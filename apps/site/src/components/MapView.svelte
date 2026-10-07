@@ -246,6 +246,7 @@
   } from "svelte-maplibre-gl";
   import { setMapPopup } from "@/lib/mapPopup";
   import { isFatalMapError, type MapFailure } from "@/lib/mapFailure";
+  import { nearestTo, tapSlopPx } from "@/lib/mapTap";
   import { visibleTimeout } from "@/lib/visibleTimeout";
   import { ArrowCounterClockwise, FlagIcon } from "phosphor-svelte";
 
@@ -403,8 +404,29 @@
   // 0 → 1 grow factor for the pop-in.
   let popScale = $state(1);
 
+  // North-up and flat, always: the pen, `clampToPen` and the card placement
+  // all do their sums in a flat, unrotated Mercator (see `WORLD_TILE_PX`), and
+  // no map here has a compass to undo a turn with. The props switch off the
+  // drag and two-finger gestures, but the keyboard's Shift+arrows still turn
+  // and tilt, and the pinch still turns — only `disableRotation` stops them,
+  // and it outlives the enable/disable that `interactive` toggles. Done as
+  // soon as the map exists rather than on load, so it holds from the first
+  // frame. Tilt is capped at zero besides (`maxPitch`), whatever the input.
+  $effect(() => {
+    if (!map) return;
+    map.keyboard.disableRotation();
+    map.touchZoomRotate.disableRotation();
+  });
+
+  // Whether the open card is holding a draft (`holdOpen` in mapPopup.ts), so a
+  // tap on the bare map only takes focus out of it. Read on tap, never
+  // rendered, so plain rather than state.
+  let held = false;
   // Popup content dismisses itself through this context (was useMapPopup).
-  setMapPopup({ close: () => (selected = null) });
+  setMapPopup({
+    close: () => (selected = null),
+    holdOpen: (on) => (held = on),
+  });
 
   // Duration for a camera move this component starts: the given length, or a
   // cut when the visitor has asked for reduced motion.
@@ -537,11 +559,15 @@
   // Back to the view the map opened on — the configured `center`/`zoom`, the
   // same pair the loading frame was drawn at, not wherever the camera was when
   // it loaded. Under `lockToOpeningView` that view is inside the pen by
-  // construction, so this move never has to be clamped.
+  // construction, so this move never has to be clamped. Bearing and pitch go
+  // back to zero too: nothing should be able to change them (see the rotation
+  // effect above), but reset means the whole opening view.
   function resetView() {
     map?.easeTo({
       center: [center[1], center[0]],
       zoom,
+      bearing: 0,
+      pitch: 0,
       duration: motionMs(600),
       essential: true,
     });
@@ -904,8 +930,18 @@
   // card on a marker near the floor of the visible area has to open upward
   // however the page would like it, or it opens into the furniture below.
   // `null` until that runs, when the preference is what is drawn.
+  //
+  // Only under `centerOnSelect`, which moves the camera to make room for the
+  // card. Without it the camera stays put, so a marker that names no side is
+  // left to MapLibre, which picks — and keeps re-picking as the map moves —
+  // whichever side, corner included, keeps the card inside the map: forced
+  // above and centred, a card on a marker near an edge opens half cut off.
   let popupSide = $state<"top" | "bottom" | null>(null);
-  const popupAnchor = $derived(popupSide ?? selectedMarker?.popupAnchor ?? "bottom");
+  const popupAnchor = $derived(
+    centerOnSelect
+      ? (popupSide ?? selectedMarker?.popupAnchor ?? "bottom")
+      : selectedMarker?.popupAnchor,
+  );
   // A new selection is a fresh decision; the side the last card settled on
   // says nothing about this one.
   $effect(() => {
@@ -1074,7 +1110,6 @@
 
   function handleLoad() {
     isLoaded = true;
-    map?.touchZoomRotate.disableRotation();
     // A late load is a success: the map was only slow (or in a background
     // tab), so the timeout's card comes down. A fatal failure's stays — `load`
     // fires over a blank map too.
@@ -1105,13 +1140,30 @@
 
   function handleClick(ev: maplibregl.MapMouseEvent) {
     if (!map || !interactive) return;
-    const feats = map.queryRenderedFeatures(ev.point, { layers: [MARKERS_LAYER] });
-    const f = feats[0];
-    if (f) {
-      const mid = f.properties?.mid as string | undefined;
-      const m = mid != null ? markerById.get(mid) : undefined;
-      if (m && markerPopup && !m.noPopup) selected = mid ?? null;
+    const mapInst = map;
+    // The tap, grown to a fingertip's reach (mapTap.ts); of the dots it
+    // catches, the one nearest where it landed.
+    const { x, y } = ev.point;
+    const slop = tapSlopPx(markerRadius + MARKER_STROKE_PX);
+    const feats = mapInst.queryRenderedFeatures(
+      [
+        [x - slop, y - slop],
+        [x + slop, y + slop],
+      ],
+      { layers: [MARKERS_LAYER] },
+    );
+    if (feats.length) {
+      const hits = feats.flatMap((f) => markerById.get(String(f.properties?.mid)) ?? []);
+      const m = nearestTo(ev.point, hits, (h) => mapInst.project([h.lon, h.lat]));
+      if (m && markerPopup && !m.noPopup) selected = String(m.id);
       else m?.onClick?.();
+      return;
+    }
+    // The bare map, with a draft open in the card (`holdOpen`): put the
+    // keyboard away and nothing else. Focus is let go of by hand because a
+    // tap on the canvas does not reliably take it on every platform.
+    if (held) {
+      (document.activeElement as HTMLElement | null)?.blur();
       return;
     }
     selected = null;
@@ -1191,6 +1243,7 @@
       dragRotate={false}
       pitchWithRotate={false}
       touchPitch={false}
+      maxPitch={0}
       scrollZoom={wheelZoom}
       {cooperativeGestures}
       doubleClickZoom={interactive}
