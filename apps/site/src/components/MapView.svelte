@@ -248,7 +248,8 @@
   import { isFatalMapError, type MapFailure } from "@/lib/mapFailure";
   import { nearestTo, tapSlopPx } from "@/lib/mapTap";
   import { visibleTimeout } from "@/lib/visibleTimeout";
-  import { ArrowCounterClockwise, FlagIcon } from "phosphor-svelte";
+  import ArrowCounterClockwise from "phosphor-svelte/lib/ArrowCounterClockwise";
+  import FlagIcon from "phosphor-svelte/lib/FlagIcon";
 
   type Props = {
     center: [number, number];
@@ -313,7 +314,9 @@
     // beat — two close together, then a rest — until the caller clears it. A
     // call to action, not a status — louder than a `pulses` ping, and on a
     // loop where a ping marks one moment. Drawn in CSS over the map rather
-    // than on the canvas, so the loop costs no repaint.
+    // than on the canvas, so the loop costs the map no WebGL redraw — the
+    // page still restyles and repaints the waves every frame, which is why
+    // the loop pauses while the map is scrolled out of view.
     beckon?: string | null;
     onViewChange?: (
       view: {
@@ -595,6 +598,24 @@
       `--beckon-wave-r: ${waveR}px`,
       `--beckon-from: ${dotR / waveR}`,
     ].join("; ");
+  });
+  // Whether the map is scrolled out of view, while something beckons. The
+  // beckon's loop costs the page a restyle and repaint every frame, for as
+  // long as it runs — which, on the landing hero, is until the visitor opens
+  // the stop, however far down the page they have read. Off-screen it pauses
+  // (see the style block) and picks up where it left off on the way back.
+  let offscreen = $state(false);
+  $effect(() => {
+    const el = root;
+    if (!el || beckon == null) return;
+    const io = new IntersectionObserver((entries) => {
+      offscreen = !entries[entries.length - 1].isIntersecting;
+    });
+    io.observe(el);
+    return () => {
+      io.disconnect();
+      offscreen = false;
+    };
   });
   const runnerData = $derived<GeoJSON.Feature | null>(
     runner
@@ -1173,12 +1194,23 @@
     const c = map?.getCanvas();
     if (c) c.style.cursor = v;
   }
+
+  // For the content of a decorative DOM marker. MapLibre gives every marker
+  // element `role="button"` and the label "Map marker" unless it already has
+  // them, so the stop numbers, the beckon and the start flag would each be
+  // announced as a button that does nothing. That element is the content's
+  // parent — the container svelte-maplibre-gl hands MapLibre — so it is hidden
+  // from assistive tech from here.
+  function hideMarkerFromAT(content: HTMLElement) {
+    content.parentElement?.setAttribute("aria-hidden", "true");
+  }
 </script>
 
 <div
   bind:this={root}
   class="map-view-root {className}"
   style="position: relative; height: 100%; width: 100%;"
+  data-offscreen={offscreen || undefined}
 >
   {#if showError}
     <div
@@ -1367,6 +1399,7 @@
                  keyframe runs on mount. -->
             {#key m.popKey}
               <span
+                {@attach hideMarkerFromAT}
                 class="marker-pop-label"
                 style="color:#fff; font-size:11px; font-weight:700; line-height:1; opacity:{m.dimmed
                   ? 0.45
@@ -1384,7 +1417,7 @@
              clear of the dot and its label (see `.beckon-wave`). -->
         <Marker lnglat={[beckonMarker.lon, beckonMarker.lat]} style={{ pointerEvents: "none" }}>
           {#snippet content()}
-            <span class="beckon" style={beckonStyle} aria-hidden="true">
+            <span {@attach hideMarkerFromAT} class="beckon" style={beckonStyle} aria-hidden="true">
               <span class="beckon-wave"></span>
             </span>
           {/snippet}
@@ -1397,6 +1430,7 @@
         <Marker lnglat={[start[1], start[0]]} style={{ pointerEvents: "none" }}>
           {#snippet content()}
             <span
+              {@attach hideMarkerFromAT}
               class="marker-pop-label start-flag"
               style="--flag-color: {START_FLAG.color}; --flag-dx: {START_FLAG.px *
                 (0.5 - START_FLAG.pole.x)}px; --flag-dy: {START_FLAG.px *
@@ -1626,6 +1660,12 @@
   }
   .beckon-wave::after {
     animation-delay: 200ms;
+  }
+  /* Held mid-beat while the map is scrolled out of view (`offscreen`). Both
+     waves pause and resume together, so the pair keeps its spacing. */
+  .map-view-root[data-offscreen] .beckon-wave::before,
+  .map-view-root[data-offscreen] .beckon-wave::after {
+    animation-play-state: paused;
   }
   /* Both run 2.08s — the 200ms between the waves, a wave's 1.8s trip, and an
      80ms rest — with the trip in the first 86.54%, held gone for the rest;

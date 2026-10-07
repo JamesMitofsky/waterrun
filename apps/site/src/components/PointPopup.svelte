@@ -15,15 +15,13 @@
 </script>
 
 <script lang="ts">
-  import {
-    CheckCircle,
-    MinusCircle,
-    PlusCircle,
-    Snowflake,
-    Trash,
-    Warning,
-    Wrench,
-  } from "phosphor-svelte";
+  import CheckCircle from "phosphor-svelte/lib/CheckCircle";
+  import MinusCircle from "phosphor-svelte/lib/MinusCircle";
+  import PlusCircle from "phosphor-svelte/lib/PlusCircle";
+  import Snowflake from "phosphor-svelte/lib/Snowflake";
+  import Trash from "phosphor-svelte/lib/Trash";
+  import Warning from "phosphor-svelte/lib/Warning";
+  import Wrench from "phosphor-svelte/lib/Wrench";
   import DogIcon from "@/components/icons/DogIcon.svelte";
   import { getMapPopup } from "@/lib/mapPopup";
   import type { Fountain, EditAction } from "@rosm/core/schemas";
