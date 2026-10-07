@@ -221,8 +221,16 @@ const ogImage = new URL("/opengraph-image.png", Astro.site).href;
           Waitlist
         </a>
       </nav>
+      {
+        /* Hydrated only where it is shown: the query is the exact complement
+          of `sm:hidden`, which compiles to `(min-width: 40rem)`, so a desktop
+          visit never downloads the menu or the Svelte runtime for it, and a
+          window narrowed past the breakpoint hydrates it then. Not the range
+          form `(width < 40rem)`: Safari 15, the floor, cannot parse it, and
+          the menu would never hydrate there. */
+      }
       <div class="sm:hidden">
-        <MobileNav client:load {currentPath} />
+        <MobileNav client:media="not all and (min-width: 40rem)" {currentPath} />
       </div>
     </header>
     <slot />
