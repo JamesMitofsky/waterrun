@@ -4,7 +4,7 @@ Platform-agnostic logic shared by [`@rosm/site`](../../apps/site) and
 [`@rosm/mobile`](../../apps/mobile): GPS/distance math, the orienteering route
 planner, BRouter turn extraction, Zod schemas, the Zustand stores (run / planner /
 outbox), the route archive, and the live-run guidance. Nothing here touches a
-browser, Capacitor, or Expo API directly.
+browser, React Native, or Expo API directly.
 
 ## Ports
 
@@ -24,9 +24,14 @@ interfaces — plus contract-only ports the apps implement in their own UI layer
 ## No build step
 
 This is a "just-in-time" internal package: it ships TypeScript **source** via
-subpath exports (`@rosm/core/geo`, `@rosm/core/stores/run`, `@rosm/core/schemas`, …).
-Next compiles it through `transpilePackages`; Metro compiles it natively. `zod` and
-`zustand` are peer dependencies so there is exactly one shared instance per app.
+subpath exports (`@rosm/core/geo`, `@rosm/core/stores/run`, `@rosm/core/schemas`, …),
+which each app compiles as part of its own build: Vite (through Astro) for the site, Metro
+for the mobile app. `zod` and `zustand` are peer dependencies so there is exactly one shared
+instance per app.
+
+Because the apps compile this source, Turborepo re-runs their lint, typecheck and test
+whenever a file here changes (the `transit` task in the root `turbo.json`), so a change
+that breaks a caller fails locally, not just in CI.
 
 ## Tests
 

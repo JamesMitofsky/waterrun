@@ -5,10 +5,8 @@ auth, GPS/background tracking, and the map; all route/GPS/OSM logic comes from
 [`@rosm/core`](../../packages/core). File-based routing via `expo-router` (`src/app/`),
 styling via Uniwind (Tailwind 4), maps via MapLibre.
 
-> **Status:** this app is wired and type-checked but has not yet been run on a device
-> or simulator. Expect to iterate on the UI and confirm the MapLibre map + background
-> location behavior on a first dev build. It is **not** runnable in Expo Go — MapLibre,
-> background location, and SecureStore are native modules that need a **dev build**.
+It is **not** runnable in Expo Go — MapLibre, background location, and SecureStore are
+native modules that need a **dev build**.
 
 ## Run it (dev build)
 
@@ -30,34 +28,48 @@ dev client. For a physical device, use an [EAS](https://docs.expo.dev/build/intr
 
 ## Environment
 
-Create `apps/mobile/.env.local` (Expo inlines `EXPO_PUBLIC_*` at build time):
+Point a dev build at a locally running site (`pnpm dev` at the repo root, which serves
+http://localhost:4321) by copying the example env file:
+
+```bash
+cp apps/mobile/.env.example apps/mobile/.env.local
+```
 
 ```
-# Backend the app talks to. Simulator + local web dev: http://localhost:3000.
-# Physical device: your machine's LAN IP (http://192.168.x.x:3000) or the Vercel URL.
-EXPO_PUBLIC_API_BASE=http://localhost:3000
+# Read only when __DEV__ is true. Simulator: http://localhost:4321.
+# Physical device: your machine's LAN IP, e.g. http://192.168.1.10:4321.
+EXPO_PUBLIC_DEV_API_BASE=http://localhost:4321
 
 # Optional: override the map tiles (never bulk-download against tile.openstreetmap.org).
 # EXPO_PUBLIC_TILE_URL=https://tiles.example.com/{z}/{x}/{y}.png
 ```
 
-OSM sign-in reuses the web backend's `/api/osm/auth?native=1` flow and returns the token
-via the `rosm://osm-callback` deep link — so the backend at `EXPO_PUBLIC_API_BASE` must be
-reachable, and its OSM app must allow the `localhost:3000/api/osm/callback` redirect (the
-`rosm://` hop is internal).
+Expo inlines `EXPO_PUBLIC_*` at build time and loads `.env.local` for Release builds too
+(e.g. `ios:device:release-build`). That is why the local override is
+`EXPO_PUBLIC_DEV_API_BASE`, which the app ignores outside `__DEV__`. Do not put
+`EXPO_PUBLIC_API_BASE` in `.env.local`: it is the backend non-dev builds talk to, each EAS
+profile in [`eas.json`](./eas.json) sets it, and without it the app falls back to `apiBase`
+in `packages/core/appConfig.json`. Set it in a build profile only to point a non-dev build
+at a different backend, such as a preview deploy.
+
+OSM sign-in reuses the site backend's `/api/osm/auth?native=1` flow and returns the token
+via the `rosm://osm-callback` deep link — so the backend must be reachable from the device,
+and its OSM OAuth app must allow the `http://localhost:4321/api/osm/callback` redirect (or
+the LAN-IP equivalent for a physical device; see `apps/site/.env.example`). The `rosm://`
+hop is internal.
 
 ## Config
 
 `app.config.ts` pulls the app id / scheme / colors from
 [`packages/core/appConfig.json`](../../packages/core/appConfig.json) — the single identity
-source shared with the web PWA. Background-location entitlements and permission strings are
+source shared with the site. Background-location entitlements and permission strings are
 declared there too.
 
 ## Build & submit (EAS)
 
-One-time: `eas init` (fills `extra.eas.projectId` in `app.config.ts`), then set the Apple
-Team / App Store Connect IDs in [`eas.json`](./eas.json) and the `EXPO_PUBLIC_API_BASE`
-per profile.
+The EAS project is already linked (`extra.eas.projectId` in `app.config.ts`). Before the
+first App Store submission, replace the Apple Team / App Store Connect ID placeholders in
+[`eas.json`](./eas.json).
 
 ```bash
 eas build --profile development --platform ios   # dev client for a device
