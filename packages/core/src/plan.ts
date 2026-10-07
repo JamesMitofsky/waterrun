@@ -38,17 +38,35 @@ function total(start: Pt, nodes: PlanNode[], loop: boolean): number {
   return pathLength([start, ...nodes], loop);
 }
 
+// Reverse a[i..k] in place.
+function reverseRange<T>(a: T[], i: number, k: number) {
+  for (; i < k; i++, k--) {
+    const t = a[i];
+    a[i] = a[k];
+    a[k] = t;
+  }
+}
+
 // 2-opt: reverse segments while it shortens the (open or closed) path.
+// Reversing nodes[i..k] only swaps the two edges at the segment's ends: its
+// interior keeps the same length because haversine is exactly symmetric. So
+// each candidate move is scored from four distances instead of re-summing the
+// whole path, which made a pass O(n³) and froze the JS thread on long routes.
 function twoOpt(start: Pt, nodes: PlanNode[], loop: boolean): PlanNode[] {
-  let best = nodes.slice();
+  const best = nodes.slice();
+  const n = best.length;
   let improved = true;
   while (improved) {
     improved = false;
-    for (let i = 0; i < best.length - 1; i++) {
-      for (let k = i + 1; k < best.length; k++) {
-        const cand = best.slice(0, i).concat(best.slice(i, k + 1).reverse(), best.slice(k + 1));
-        if (total(start, cand, loop) + 1e-6 < total(start, best, loop)) {
-          best = cand;
+    for (let i = 0; i < n - 1; i++) {
+      for (let k = i + 1; k < n; k++) {
+        const prev = i === 0 ? start : best[i - 1];
+        // An open path's last node has no outgoing edge to swap.
+        const next = k < n - 1 ? best[k + 1] : loop ? start : null;
+        let gain = haversine(prev, best[i]) - haversine(prev, best[k]);
+        if (next) gain += haversine(best[k], next) - haversine(best[i], next);
+        if (gain > 1e-6) {
+          reverseRange(best, i, k);
           improved = true;
         }
       }
@@ -60,6 +78,16 @@ function twoOpt(start: Pt, nodes: PlanNode[], loop: boolean): PlanNode[] {
 // Cheapest-insertion of leftover points that sit a tiny detour off the route.
 // Each round inserts the single point with the smallest added length, as long as
 // that detour stays under `maxCost` and (when targeting) keeps total under budget.
+//
+// Rescoring every candidate against every edge each round made this O(m·n²) per
+// pick, and pickup snowballs (each pick adds edges that bring neighbours within
+// reach), so a marker tap could block the JS thread for seconds. Instead each
+// candidate caches its cheapest edge. Inserting p into a→b only replaces that
+// edge with a→p and p→b: a candidate whose best edge was elsewhere compares
+// against the two new edges, and only those that were cheapest on a→b rescan
+// the route. The picks match a full rescan exactly, ties included (lowest pool
+// index, then earliest edge), because every cost is the same three-distance
+// sum a full rescan computes.
 function pickup(
   start: Pt,
   nodes: PlanNode[],
@@ -71,35 +99,81 @@ function pickup(
   const cur = nodes.slice();
   const remaining = pool.slice();
   const addedIds: number[] = [];
-  let progress = true;
-  while (progress) {
-    progress = false;
-    const base = total(start, cur, loop);
-    let bestCost = Infinity;
-    let bestIdx = -1;
+  // Edge i runs from start (i = 0) or cur[i - 1] to cur[i], or past the last
+  // node back to start (loop) or nowhere (an open path's end, where a point is
+  // simply appended: a zero-length edge to nothing).
+  const from = (i: number): Pt => (i === 0 ? start : cur[i - 1]);
+  const to = (i: number): Pt | null => (i < cur.length ? cur[i] : loop ? start : null);
+  const len = Array.from({ length: cur.length + 1 }, (_, i) => {
+    const b = to(i);
+    return b ? haversine(from(i), b) : 0;
+  });
+
+  // Each candidate's cheapest insertion: the length it adds, and at which edge.
+  // Inserting q into a→b adds d(a,q) + d(q,b) − d(a,b).
+  const cost: number[] = [];
+  const edge: number[] = [];
+  const scan = (r: number) => {
+    const q = remaining[r];
+    cost[r] = Infinity;
+    let dFrom = haversine(start, q);
+    for (let i = 0; i <= cur.length; i++) {
+      const b = to(i);
+      const dTo = b ? haversine(q, b) : 0;
+      const c = dFrom + dTo - len[i];
+      if (c < cost[r]) {
+        cost[r] = c;
+        edge[r] = i;
+      }
+      // This edge's end is the next one's start (haversine is symmetric).
+      dFrom = dTo;
+    }
+  };
+  for (let r = 0; r < remaining.length; r++) scan(r);
+
+  for (;;) {
     let bestR = -1;
+    let bestCost = Infinity;
     for (let r = 0; r < remaining.length; r++) {
-      const node: PlanNode = {
-        lat: remaining[r].lat,
-        lon: remaining[r].lon,
-        fountain: remaining[r],
-      };
-      for (let idx = 0; idx <= cur.length; idx++) {
-        const cand = cur.slice(0, idx).concat(node, cur.slice(idx));
-        const delta = total(start, cand, loop) - base;
-        if (delta < bestCost) {
-          bestCost = delta;
-          bestIdx = idx;
-          bestR = r;
-        }
+      if (cost[r] < bestCost) {
+        bestCost = cost[r];
+        bestR = r;
       }
     }
-    if (bestR >= 0 && bestCost <= maxCost && base + bestCost <= budget) {
-      const f = remaining[bestR];
-      cur.splice(bestIdx, 0, { lat: f.lat, lon: f.lon, fountain: f });
-      addedIds.push(f.id);
-      remaining.splice(bestR, 1);
-      progress = true;
+    const base = total(start, cur, loop);
+    if (bestR < 0 || bestCost > maxCost || base + bestCost > budget) break;
+
+    const f = remaining[bestR];
+    const at = edge[bestR];
+    const a = from(at);
+    const b = to(at);
+    const p: PlanNode = { lat: f.lat, lon: f.lon, fountain: f };
+    cur.splice(at, 0, p);
+    len.splice(at, 1, haversine(a, p), b ? haversine(p, b) : 0);
+    addedIds.push(f.id);
+    remaining.splice(bestR, 1);
+    cost.splice(bestR, 1);
+    edge.splice(bestR, 1);
+
+    // Edge `at` is now a→p, p→b follows it, and every later edge shifts up one.
+    for (let r = 0; r < remaining.length; r++) {
+      if (edge[r] === at) {
+        scan(r);
+        continue;
+      }
+      if (edge[r] > at) edge[r]++;
+      const q = remaining[r];
+      const dQP = haversine(q, p);
+      const viaA = haversine(a, q) + dQP - len[at];
+      if (viaA < cost[r] || (viaA === cost[r] && at < edge[r])) {
+        cost[r] = viaA;
+        edge[r] = at;
+      }
+      const viaP = dQP + (b ? haversine(q, b) : 0) - len[at + 1];
+      if (viaP < cost[r] || (viaP === cost[r] && at + 1 < edge[r])) {
+        cost[r] = viaP;
+        edge[r] = at + 1;
+      }
     }
   }
   return { nodes: cur, addedIds };
@@ -128,17 +202,18 @@ export function planRoute({
   // Greedy fill only when a target distance is set; with no target the route is
   // defined purely by the pinned marks (and via-points).
   if (hasTarget) {
+    // Length of start→…→cur, summed in path order like total() does, so each fit
+    // check is one or two haversines instead of a re-sum of the whole route.
+    let openM = total(start, order, false);
     while (remaining.length > 0) {
       remaining.sort((a, b) => haversine(cur, a) - haversine(cur, b));
       let added = false;
       for (let i = 0; i < remaining.length; i++) {
-        const node: PlanNode = {
-          lat: remaining[i].lat,
-          lon: remaining[i].lon,
-          fountain: remaining[i],
-        };
-        if (total(start, [...order, node], loop) <= budget) {
-          order.push(node);
+        const leg = haversine(cur, remaining[i]);
+        const closing = loop ? haversine(remaining[i], start) : 0;
+        if (openM + leg + closing <= budget) {
+          order.push({ lat: remaining[i].lat, lon: remaining[i].lon, fountain: remaining[i] });
+          openM += leg;
           cur = remaining[i];
           remaining.splice(i, 1);
           added = true;
