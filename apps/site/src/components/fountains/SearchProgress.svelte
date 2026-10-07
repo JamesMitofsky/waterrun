@@ -40,6 +40,7 @@
 <script lang="ts">
   import { fade, fly } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
+  import { prefersReducedMotion } from "svelte/motion";
 
   // Self-narrating loader for a fountain fetch. `overlay` frosts a map plate
   // behind glass — the map stays faintly visible through it, never fully hidden;
@@ -73,9 +74,16 @@
     // Safari, so the bar is driven straight into these nodes (they hold no other
     // Svelte-managed content, so the runtime can't get out of sync).
     if (fillEl) fillEl.style.width = `${p}%`;
+    // The figure only when it changes, which is a few times a second, not
+    // every frame: each write replaces the text node and dirties its layout.
+    const pct = `${Math.round(p)}%`;
     // eslint-disable-next-line svelte/no-dom-manipulating
-    if (pctEl) pctEl.textContent = `${Math.round(p)}%`;
+    if (pctEl && pctEl.textContent !== pct) pctEl.textContent = pct;
   }
+
+  // Every transition's duration goes through this — reduced motion collapses
+  // them to a cut, as in MobileNav.
+  const ms = (n: number) => (prefersReducedMotion.current ? 0 : n);
 
   const progressAt = $derived(makeProgressAt(steps));
   const step = $derived(steps[stepIdx] ?? steps[steps.length - 1]);
@@ -160,8 +168,8 @@
   <div class="relative flex min-h-[4rem] w-full max-w-md items-start justify-center">
     {#key stepIdx}
       <p
-        in:fly={{ y: 10, duration: 320, delay: 90, easing: cubicOut }}
-        out:fly={{ y: -10, duration: 260, easing: cubicOut }}
+        in:fly={{ y: 10, duration: ms(320), delay: ms(90), easing: cubicOut }}
+        out:fly={{ y: -10, duration: ms(260), easing: cubicOut }}
         class="text-muted absolute inset-x-0 top-0 font-mono text-sm leading-relaxed tracking-tight"
       >
         {step.text}
@@ -173,14 +181,14 @@
 {#if show && !failed}
   {#if variant === "overlay"}
     <div
-      transition:fade={{ duration: 550 }}
+      transition:fade={{ duration: ms(550) }}
       class="bg-surface/30 absolute inset-0 z-[650] flex flex-col items-center justify-center gap-8 px-8 text-center backdrop-blur-md"
     >
       {@render body()}
     </div>
   {:else}
     <div
-      transition:fade={{ duration: 300 }}
+      transition:fade={{ duration: ms(300) }}
       class="flex flex-col items-center gap-4 py-1 text-center"
     >
       {@render body()}
