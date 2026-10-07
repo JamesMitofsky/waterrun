@@ -54,14 +54,14 @@ const {
   overlayHeader = false,
 } = Astro.props;
 
-// Social card, rendered to a static PNG at build time by
-// `pages/opengraph-image.png.ts`. Crawlers need an absolute URL, resolved
+// Social card, rendered to a static JPEG at build time by
+// `pages/opengraph-image.jpg.ts`. Crawlers need an absolute URL, resolved
 // against the canonical origin (`site` in astro.config) rather than whatever
 // host served this page: the production card is the one every share should
-// show, and it is the only one guaranteed to exist next month. Its size is
-// stated alongside so Facebook and friends can lay the preview out before
-// they have fetched the image.
-const ogImage = new URL("/opengraph-image.png", Astro.site).href;
+// show, and it is the only one guaranteed to exist next month. Its size and
+// type are stated alongside so Facebook and friends can lay the preview out
+// before they have fetched the image.
+const ogImage = new URL("/opengraph-image.jpg", Astro.site).href;
 ---
 
 <!doctype html>
@@ -106,6 +106,7 @@ const ogImage = new URL("/opengraph-image.png", Astro.site).href;
     <meta property="og:description" content={description} />
     <meta property="og:type" content="website" />
     <meta property="og:image" content={ogImage} />
+    <meta property="og:image:type" content="image/jpeg" />
     <meta property="og:image:width" content={String(OG_SIZE.width)} />
     <meta property="og:image:height" content={String(OG_SIZE.height)} />
     <meta property="og:image:alt" content={OG_ALT} />
