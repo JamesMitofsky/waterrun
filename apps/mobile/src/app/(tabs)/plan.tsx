@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Text, useWindowDimensions, View } from "react-native";
 import { useRouter } from "expo-router";
-import { BottomSheet, RNHostView } from "@expo/ui";
+import { PointSheetHost } from "../../components/ui/PointSheetHost";
 import { usePlanner, inRouteIdsOf } from "@rosm/core/stores/planner";
 import { useRun } from "@rosm/core/stores/run";
 import { useOutbox } from "@rosm/core/stores/outbox";
@@ -216,33 +216,29 @@ export default function Plan() {
         )}
       </View>
 
-      {/* Native OS bottom sheet for the tapped point (same host pattern as the
-          quick-update tab — see the comments there for the sizing workaround). */}
-      <BottomSheet isPresented={selectedId != null} onDismiss={() => setSelectedId(null)}>
-        <RNHostView matchContents>
-          <View style={{ width: winW - 32 }}>
-            {selected ? (
-              <PointSheet
-                fountain={selected}
-                edit={edits[selected.id]}
-                inRoute={inRouteIds.has(selected.id)}
-                onToggleRoute={() => {
-                  hapticSelect();
-                  usePlanner.getState().toggleStop(selected.id);
-                  setSelectedId(null);
-                }}
-                onAction={(action, extras) =>
-                  updatePoint(selected.id, action, markLabel(selected), extras)
-                }
-              />
-            ) : (
-              <View className="items-center justify-center py-12">
-                <ActivityIndicator />
-              </View>
-            )}
+      {/* Native OS bottom sheet for the tapped point (shared with the other
+          survey screens — see PointSheetHost for sizing and the keyboard). */}
+      <PointSheetHost isPresented={selectedId != null} onDismiss={() => setSelectedId(null)}>
+        {selected ? (
+          <PointSheet
+            fountain={selected}
+            edit={edits[selected.id]}
+            inRoute={inRouteIds.has(selected.id)}
+            onToggleRoute={() => {
+              hapticSelect();
+              usePlanner.getState().toggleStop(selected.id);
+              setSelectedId(null);
+            }}
+            onAction={(action, extras) =>
+              updatePoint(selected.id, action, markLabel(selected), extras)
+            }
+          />
+        ) : (
+          <View className="items-center justify-center py-12">
+            <ActivityIndicator />
           </View>
-        </RNHostView>
-      </BottomSheet>
+        )}
+      </PointSheetHost>
     </View>
   );
 }

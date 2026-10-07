@@ -164,6 +164,7 @@ export function PointSheet({ fountain, edit, onAction, inRoute, onToggleRoute }:
           submitBox={detailFor === "confirm" ? "bg-green-600" : "bg-red-600"}
           isRemoved={detailFor === "removed"}
           isProblem={detailFor === "problem"}
+          onCancel={() => setDetailFor(null)}
           onSubmit={(extras, action) => {
             onAction(action ?? (detailFor as SurveyAction), extras);
             setDetailFor(null);

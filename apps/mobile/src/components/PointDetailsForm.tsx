@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { CheckCircleIcon, SnowflakeIcon, WarningIcon, WrenchIcon } from "phosphor-react-native";
 import type { Audience, Dispenser, EditExtras } from "@rosm/core/schemas";
 import { audienceFromTags } from "@rosm/core/audience";
 import { dispenserFromTags } from "@rosm/core/dispenser";
 import { AudienceToggle } from "./AudienceToggle";
 import { DispenserToggle } from "./DispenserToggle";
+import { TextField } from "./ui/TextField";
 
 const QUICK_TAGS = [
   "Not draining",
@@ -208,7 +209,7 @@ export function PointDetailsForm({
         <Text className="text-base text-xs font-bold tracking-wider uppercase">
           {broken ? "Details / Note" : "Public Note"}
         </Text>
-        <TextInput
+        <TextField
           value={note}
           onChangeText={setNote}
           placeholder={broken ? "Describe what's wrong…" : "Add a public note (optional)"}
@@ -221,10 +222,11 @@ export function PointDetailsForm({
 
       <View className="flex-row gap-3 pt-2">
         {onCancel ? (
+          // Intrinsic width, so the submit label keeps the rest of the row.
           <Pressable
             onPress={onCancel}
             accessibilityRole="button"
-            className="border-border bg-surface-deep flex-1 items-center justify-center rounded-xl border px-4 py-3"
+            className="border-border bg-surface-deep items-center justify-center rounded-xl border px-4 py-3"
           >
             <Text className="text-base font-bold">Back</Text>
           </Pressable>
