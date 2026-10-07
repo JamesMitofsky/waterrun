@@ -17,6 +17,7 @@ import {
   makePkce,
   openChangeset,
   putNode,
+  safeReturnPath,
   todayIso,
 } from "@/lib/osm";
 import { APP_NAME } from "@/lib/appConfig";
@@ -467,6 +468,39 @@ describe("nodes", () => {
       '<osm><node lat="48.1" lon="2.2" changeset="42">' +
         '<tag k="amenity" v="drinking_water"/></node></osm>',
     );
+  });
+});
+
+describe("safeReturnPath", () => {
+  const origin = "https://waterrun.app";
+
+  it.each([
+    ["//evil.com"],
+    ["/\\evil.com"],
+    ["/\t/evil.com"],
+    ["/\n/evil.com"],
+    ["/\r\n/evil.com"],
+    ["https://evil.com"],
+    ["javascript:alert(1)"],
+    [""],
+  ])("refuses %j", (raw) => {
+    expect(safeReturnPath(raw, origin)).toBeNull();
+  });
+
+  it("refuses what the old prefix check let through to evil.com", () => {
+    // The URL parser strips the tab, so this resolved to https://evil.com/.
+    expect(new URL("/\t/evil.com", origin).origin).toBe("https://evil.com");
+    expect(safeReturnPath("/\t/evil.com", origin)).toBeNull();
+  });
+
+  it("keeps a same-origin path with its query and hash", () => {
+    expect(safeReturnPath("/public-drinking-fountains?x=1#a", origin)).toBe(
+      "/public-drinking-fountains?x=1#a",
+    );
+  });
+
+  it("returns the path as the browser would resolve it", () => {
+    expect(safeReturnPath("/a/../b", origin)).toBe("/b");
   });
 });
 

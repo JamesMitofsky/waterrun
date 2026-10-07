@@ -24,11 +24,23 @@ const DRY_RUN_NODE_ID = 999999999;
 // the brand name so app edits read as "Water Run" on osm.org, not the repo slug.
 const CREATED_BY = APP_NAME;
 
-// A returnTo is safe only as a same-origin relative path: one leading slash and
-// not `//`/`/\` (which browsers treat as a protocol-relative absolute URL). This
-// blocks open redirects through the OAuth flow.
-export function isSafeReturnTo(p: string): boolean {
-  return p.startsWith("/") && !p.startsWith("//") && !p.startsWith("/\\");
+// The same-origin path to send the user back to after sign-in, or null when
+// `raw` could lead anywhere else. The check that matters is resolving it the
+// way the browser will and comparing origins: the URL parser drops tabs and
+// newlines and reads `\` as `/`, so "/\t/evil.com" passes any prefix test yet
+// resolves to https://evil.com. Control characters and backslashes are refused
+// up front as well, since no page we link back to has them in its path.
+export function safeReturnPath(raw: string, origin: string): string | null {
+  // eslint-disable-next-line no-control-regex
+  if (!raw.startsWith("/") || /[\u0000-\u001F\\]/.test(raw)) return null;
+  let url: URL;
+  try {
+    url = new URL(raw, origin);
+  } catch {
+    return null;
+  }
+  if (url.origin !== origin) return null;
+  return url.pathname + url.search + url.hash;
 }
 
 // ---- PKCE ----
