@@ -1,4 +1,5 @@
-# CI + production deploy for main.
+# CI for every PR into main or develop (feature PRs target develop), plus the
+# production deploy for main.
 #
 # Vercel's Git integration is disabled (apps/site/vercel.json:
 # git.deploymentEnabled = false; Vercel reads vercel.json from the project's
@@ -7,8 +8,9 @@
 # production via the Vercel CLI, and only after Quality and Build pass
 # (`needs`) — untested code never reaches production.
 #
-# Preview deploys for feature branches are opt-in: comment `/deploy` on a PR to
-# trigger deploy-preview.yml. No other branch deploys.
+# Preview deploys for feature branches are opt-in: comment `/deploy` on a PR
+# from a branch of this repo to trigger deploy-preview.yml. No other branch
+# deploys.
 #
 # Belt-and-suspenders: also enable branch protection on `main` with "Require
 # status checks to pass" for "Quality" and "Build" so merges need a green suite.
@@ -20,8 +22,13 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
   workflow_dispatch:
+
+# Read-only GITHUB_TOKEN: these jobs only read the repo, and on PRs they run
+# the PR's code, so they must not inherit a broader repo-default scope.
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -90,6 +97,10 @@ jobs:
       group: deploy-production
       cancel-in-progress: false
     env:
+      # Exact Vercel CLI, bumped on purpose and kept in step with
+      # deploy-preview.yml: a bare `pnpm dlx vercel` runs whatever was published
+      # last, so a breaking release could fail deploys with no change here.
+      VERCEL_CLI: vercel@59.26.0
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -104,10 +115,10 @@ jobs:
           cache: pnpm
 
       - name: Pull Vercel production env
-        run: pnpm dlx vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+        run: pnpm dlx "$VERCEL_CLI" pull --yes --environment=production --token="$VERCEL_TOKEN"
 
       - name: Build with Vercel
-        run: pnpm dlx vercel build --prod --token="$VERCEL_TOKEN"
+        run: pnpm dlx "$VERCEL_CLI" build --prod --token="$VERCEL_TOKEN"
 
       - name: Deploy prebuilt output to production
-        run: pnpm dlx vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"
+        run: pnpm dlx "$VERCEL_CLI" deploy --prebuilt --prod --token="$VERCEL_TOKEN"
