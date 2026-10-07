@@ -1,9 +1,10 @@
 import type { ApiPort } from "@rosm/core/ports";
+import { ApiTimeoutError } from "@rosm/core/apiResponse";
 import cfg from "@rosm/core/appConfig.json";
 import { getToken } from "../auth/authStore";
 import { kv } from "./storage";
 
-// Absolute base for the ROSM backend (the Next.js /api routes on Vercel). EAS build
+// Absolute base for the Water Run backend (the Astro /api endpoints on Vercel). EAS build
 // profiles inject EXPO_PUBLIC_API_BASE; a local `expo start` has no such env, so we
 // fall back to the shared appConfig default rather than emitting a relative URL —
 // on device a relative URL has no origin and crashes native modules (e.g. the OSM
@@ -37,7 +38,7 @@ const jsonResponse = (body: string) =>
   new Response(body, { status: 200, headers: { "Content-Type": "application/json" } });
 
 export const api: ApiPort = {
-  apiFetch: async (path, init = {}) => {
+  apiFetch: async (path, init = {}, { timeoutMs } = {}) => {
     if (NATIVE_RUN_NOOP.test(path)) return jsonResponse("null");
     if (DRAFT_ROUTE.test(path)) {
       const method = (init.method ?? "GET").toUpperCase();
@@ -48,6 +49,29 @@ export const api: ApiPort = {
     const headers = new Headers(init.headers);
     const token = getToken();
     if (token && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`);
-    return fetch(apiUrl(path), { ...init, headers });
+    if (!timeoutMs) return fetch(apiUrl(path), { ...init, headers });
+
+    // Same contract as the site's apiFetch: abort on expiry and reject with
+    // ApiTimeoutError, while still honoring a caller-supplied signal.
+    const ctrl = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      ctrl.abort();
+    }, timeoutMs);
+    const onCallerAbort = () => ctrl.abort();
+    if (init.signal) {
+      if (init.signal.aborted) ctrl.abort();
+      else init.signal.addEventListener("abort", onCallerAbort, { once: true });
+    }
+    try {
+      return await fetch(apiUrl(path), { ...init, headers, signal: ctrl.signal });
+    } catch (e) {
+      if (timedOut) throw new ApiTimeoutError(timeoutMs);
+      throw e;
+    } finally {
+      clearTimeout(timer);
+      init.signal?.removeEventListener("abort", onCallerAbort);
+    }
   },
 };

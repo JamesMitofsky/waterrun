@@ -9,6 +9,7 @@ export function makeMemoryKv(): KvPort {
   return {
     get: (k) => (store.has(k) ? (store.get(k) as string) : null),
     set: (k, v) => void store.set(k, v),
+    remove: (k) => void store.delete(k),
   };
 }
 

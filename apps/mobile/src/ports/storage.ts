@@ -9,6 +9,7 @@ import type { OutboxItem } from "@rosm/core/stores/outbox";
 export const kv: KvPort = {
   get: (key) => Storage.getItemSync(key),
   set: (key, value) => Storage.setItemSync(key, value),
+  remove: (key) => void Storage.removeItemSync(key),
 };
 
 // One row per queued edit (keyed by id) + one row per meta value, mirroring the
@@ -21,9 +22,20 @@ export const outboxStorage: OutboxStoragePort = {
     const keys = (await Storage.getAllKeys()).filter((k) => k.startsWith(ITEM_PREFIX));
     if (keys.length === 0) return [];
     const rows = await Storage.multiGet(keys);
-    return rows
-      .map(([, v]) => (v ? (JSON.parse(v) as OutboxItem) : null))
-      .filter((i): i is OutboxItem => i !== null);
+    // Parse row by row: one corrupt or half-written row must not throw away the
+    // whole queue (and with it every other unsynced survey edit).
+    const items: OutboxItem[] = [];
+    for (const [key, v] of rows) {
+      if (!v) continue;
+      try {
+        const item = JSON.parse(v) as OutboxItem;
+        if (item && typeof item.id === "string" && typeof item.nodeId === "number")
+          items.push(item);
+      } catch {
+        console.warn(`[outbox] skipping unreadable row ${key}`);
+      }
+    }
+    return items;
   },
   put: async (item) => {
     await Storage.setItem(ITEM_PREFIX + item.id, JSON.stringify(item));
