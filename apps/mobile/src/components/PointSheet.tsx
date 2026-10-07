@@ -1,12 +1,10 @@
 import { useState } from "react";
 import { Linking, Pressable, Text, View } from "react-native";
-import {
-  ArrowSquareOutIcon,
-  CheckCircleIcon,
-  SnowflakeIcon,
-  TrashIcon,
-  WarningIcon,
-} from "phosphor-react-native";
+import { ArrowSquareOutIcon } from "phosphor-react-native/src/icons/ArrowSquareOut";
+import { CheckCircleIcon } from "phosphor-react-native/src/icons/CheckCircle";
+import { SnowflakeIcon } from "phosphor-react-native/src/icons/Snowflake";
+import { TrashIcon } from "phosphor-react-native/src/icons/Trash";
+import { WarningIcon } from "phosphor-react-native/src/icons/Warning";
 import { DogIcon } from "./icons/DogIcon";
 import type { EditAction, EditExtras, Fountain } from "@rosm/core/schemas";
 import type { SyncState } from "@rosm/core/stores/outbox";

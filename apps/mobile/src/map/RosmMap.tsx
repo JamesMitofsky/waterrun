@@ -8,7 +8,7 @@ import {
   Map,
   UserLocation,
 } from "@maplibre/maplibre-react-native";
-import { CrosshairSimpleIcon } from "phosphor-react-native";
+import { CrosshairSimpleIcon } from "phosphor-react-native/src/icons/CrosshairSimple";
 import type { Feature, FeatureCollection, Point } from "geojson";
 import { OSM_STYLE_JSON } from "./style";
 

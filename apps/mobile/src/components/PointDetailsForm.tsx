@@ -1,6 +1,9 @@
 import { useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
-import { CheckCircleIcon, SnowflakeIcon, WarningIcon, WrenchIcon } from "phosphor-react-native";
+import { CheckCircleIcon } from "phosphor-react-native/src/icons/CheckCircle";
+import { SnowflakeIcon } from "phosphor-react-native/src/icons/Snowflake";
+import { WarningIcon } from "phosphor-react-native/src/icons/Warning";
+import { WrenchIcon } from "phosphor-react-native/src/icons/Wrench";
 import type { Audience, Dispenser, EditExtras } from "@rosm/core/schemas";
 import { audienceFromTags } from "@rosm/core/audience";
 import { dispenserFromTags } from "@rosm/core/dispenser";

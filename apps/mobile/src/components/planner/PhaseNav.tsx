@@ -1,5 +1,6 @@
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
-import { CaretLeftIcon, CaretRightIcon } from "phosphor-react-native";
+import { CaretLeftIcon } from "phosphor-react-native/src/icons/CaretLeft";
+import { CaretRightIcon } from "phosphor-react-native/src/icons/CaretRight";
 
 type NavAction = {
   label: string;
