@@ -140,15 +140,10 @@ body {
   padding-bottom: env(safe-area-inset-bottom);
 }
 
-/* MapLibre uses the app font, and its popups drop the default chrome padding so
-   our own popup bodies control their spacing. */
-.maplibregl-map {
-  font: inherit;
-}
-.maplibregl-popup-content {
-  padding: 0.5rem 0.625rem;
-  border-radius: 0.5rem;
-}
+/* Map popups keep MapLibre's own font (12px/20px Helvetica), padding and
+   corners. maplibre-gl.css loads after this sheet, so overrides here at equal
+   specificity never applied, and the popup bodies were designed against that
+   look. Re-styling them means a more specific selector in MapView. */
 /* The shadow is cast by the popup as a whole, not the card: the tip is a
    border-drawn triangle that a `box-shadow` on the card cannot follow, so
    a `drop-shadow` on their parent traces card and tip as one silhouette.
@@ -184,10 +179,29 @@ body {
   transform-origin: 50% 100%;
   animation: popup-pop 380ms ease-out both;
 }
-/* Opened beneath its marker, the popup meets it at its top edge instead. */
-.maplibregl-popup-anchor-top .maplibregl-popup-content,
-.maplibregl-popup-anchor-top .maplibregl-popup-tip {
+/* Opened on any other side, the anchor class names the edge or corner that
+   meets the marker — MapLibre picks one that fits the map whenever a popup
+   gives no anchor of its own — so the spring pivots there instead. */
+.maplibregl-popup-anchor-top :is(.maplibregl-popup-content, .maplibregl-popup-tip) {
   transform-origin: 50% 0;
+}
+.maplibregl-popup-anchor-top-left :is(.maplibregl-popup-content, .maplibregl-popup-tip) {
+  transform-origin: 0 0;
+}
+.maplibregl-popup-anchor-top-right :is(.maplibregl-popup-content, .maplibregl-popup-tip) {
+  transform-origin: 100% 0;
+}
+.maplibregl-popup-anchor-bottom-left :is(.maplibregl-popup-content, .maplibregl-popup-tip) {
+  transform-origin: 0 100%;
+}
+.maplibregl-popup-anchor-bottom-right :is(.maplibregl-popup-content, .maplibregl-popup-tip) {
+  transform-origin: 100% 100%;
+}
+.maplibregl-popup-anchor-left :is(.maplibregl-popup-content, .maplibregl-popup-tip) {
+  transform-origin: 0 50%;
+}
+.maplibregl-popup-anchor-right :is(.maplibregl-popup-content, .maplibregl-popup-tip) {
+  transform-origin: 100% 50%;
 }
 @media (prefers-reduced-motion: reduce) {
   .maplibregl-popup-content,
