@@ -9,6 +9,15 @@ import {
   toggleQuickTag,
 } from "../src/note";
 
+describe("NOTE_MAX", () => {
+  // The forms check this limit instead of running the zod schema client-side,
+  // so it must stay exactly the server's.
+  it("is exactly the note limit EditExtras enforces", () => {
+    expect(EditExtras.safeParse({ note: "x".repeat(NOTE_MAX) }).success).toBe(true);
+    expect(EditExtras.safeParse({ note: "x".repeat(NOTE_MAX + 1) }).success).toBe(false);
+  });
+});
+
 describe("noteTokens", () => {
   it("splits on semicolons, trims, and drops empty parts", () => {
     expect(noteTokens(" Leaks ;;Not draining; ")).toEqual(["Leaks", "Not draining"]);
