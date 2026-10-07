@@ -147,6 +147,8 @@ export function PointSheet({ fountain, edit, onAction, inRoute, onToggleRoute }:
           {edit.changesetUrl ? (
             <Pressable
               onPress={() => Linking.openURL(edit.changesetUrl!)}
+              // A 16pt line of text; the slop makes it a 44pt target.
+              hitSlop={14}
               className="mt-0.5 flex-row items-center gap-1"
             >
               <ArrowSquareOutIcon size={14} color="#0c0d0a" />

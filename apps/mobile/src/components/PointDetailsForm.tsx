@@ -204,7 +204,9 @@ export function PointDetailsForm({
                 disabled={next === null}
                 accessibilityRole="button"
                 accessibilityState={{ selected: active, disabled: next === null }}
-                className={`rounded-lg border px-2.5 py-1.5 ${
+                // Half the 6px gap, so neighbouring pills' targets never overlap.
+                hitSlop={3}
+                className={`rounded-lg border px-2.5 py-2 ${
                   active ? "border-amber-600 bg-amber-500" : "border-border bg-surface-deep"
                 } ${next === null ? "opacity-40" : ""}`}
               >

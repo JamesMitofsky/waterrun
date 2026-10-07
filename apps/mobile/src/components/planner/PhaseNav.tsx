@@ -9,6 +9,10 @@ type NavAction = {
   loading?: boolean;
 };
 
+// The text buttons draw ~36pt tall; the slop takes their targets to 44pt
+// without changing the look (nothing interactive sits close enough to overlap).
+const NAV_HIT_SLOP = { top: 4, bottom: 4, left: 8, right: 8 };
+
 // Shared prev/next chrome so the planner's stacked views — setup → build → run —
 // page through in order. Forward carries that view's transition (and its gating);
 // back just steps to the prior view. A missing side (first/last view) leaves an
@@ -21,6 +25,7 @@ export function PhaseNav({ back, forward }: { back?: NavAction; forward?: NavAct
           onPress={back.onPress}
           disabled={back.disabled || back.loading}
           accessibilityRole="button"
+          hitSlop={NAV_HIT_SLOP}
           className={`flex-row items-center gap-1 rounded-xl px-2 py-2 ${
             back.disabled || back.loading ? "opacity-40" : ""
           }`}
@@ -36,6 +41,7 @@ export function PhaseNav({ back, forward }: { back?: NavAction; forward?: NavAct
           onPress={forward.onPress}
           disabled={forward.disabled || forward.loading}
           accessibilityRole="button"
+          hitSlop={NAV_HIT_SLOP}
           className={`flex-row items-center gap-1 rounded-xl px-2 py-2 ${
             forward.disabled || forward.loading ? "opacity-40" : ""
           }`}

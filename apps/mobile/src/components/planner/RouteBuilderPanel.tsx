@@ -41,15 +41,20 @@ export function RouteBuilderPanel({ onStartRun }: { onStartRun: () => void }) {
             {removed.map((f) => (
               <View
                 key={f.id}
-                className="bg-surface-deep mb-1 flex-row items-center justify-between rounded-lg px-2 py-1.5"
+                className="bg-surface-deep mb-1 flex-row items-center justify-between rounded-lg py-0.5 pl-2"
               >
                 <Text className="text-muted flex-1 text-xs line-through" numberOfLines={1}>
                   {markLabel(f)}
                 </Text>
+                {/* Neighbouring targets end up 8pt apart, too close for a big
+                    hitSlop, so this one grows with padding (which also supplies
+                    the row's right inset) and takes half that gap as slop. */}
                 <Pressable
                   onPress={() => p.restoreStop(f.id)}
                   accessibilityRole="button"
                   accessibilityLabel="add point back to route"
+                  hitSlop={{ top: 4, bottom: 4 }}
+                  className="px-2 py-2"
                 >
                   <Text className="text-link text-xs font-semibold">Add back</Text>
                 </Pressable>
