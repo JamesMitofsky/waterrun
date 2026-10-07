@@ -101,17 +101,8 @@ const LIVE_NARROW_FRAME = { width: 640, height: 1000 };
 /** MapLibre's vector tile size. Zoom is defined against it: world = SIZE * 2^zoom. */
 export const TILE_SIZE = 512;
 
-/**
- * How long `MapFrame.astro`'s loading overlay takes to dissolve once the map
- * underneath reports its first paint.
- *
- * Long enough to read as the frame clearing rather than as a cut, and no
- * longer: the map is already drawn and interactive by then, so every extra
- * millisecond is a finished map behind frosted glass. Defined here, beside
- * the rest of the frame contract, because a map that starts something the
- * moment it is revealed (`DemoRunMap`'s replay) has to wait this out first.
- */
-export const MAP_REVEAL_MS = 280;
+/** The loading overlay's dissolve; lives in its own leaf module, see there. */
+export { MAP_REVEAL_MS } from "./reveal";
 
 /**
  * The hero frame: the landing page's first section, which the demo map fills

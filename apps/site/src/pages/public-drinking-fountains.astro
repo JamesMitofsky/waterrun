@@ -33,12 +33,13 @@ export const prerender = true;
         the map's own controls stack top-right, its retry card sits top-left,
         and attribution is bottom-right. A sibling of the frame, not a child —
         the frame isolates its stacking, so this sits over everything in it,
-        loading overlay included. */
+        loading overlay included. The legend is static markup, so it is
+        server-rendered only: no hydration directive, no island to ship. */
     }
     <div
       class="bg-surface/85 border-base/10 pointer-events-none absolute bottom-4 left-4 z-10 max-w-[calc(100%-2rem)] rounded-xl border px-4 py-3 shadow-lg backdrop-blur-md"
     >
-      <FreshnessLegend client:visible />
+      <FreshnessLegend />
     </div>
   </main>
 </Layout>
