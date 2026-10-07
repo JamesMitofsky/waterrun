@@ -1,9 +1,11 @@
 # CI + production deploy for main.
 #
-# Vercel's Git integration is disabled (see vercel.json: git.deploymentEnabled
-# = false), so nothing deploys automatically on push. Instead the `deploy` job
-# below promotes main to production via the Vercel CLI, and only after Quality
-# and Build pass (`needs`) — untested code never reaches production.
+# Vercel's Git integration is disabled (apps/site/vercel.json:
+# git.deploymentEnabled = false; Vercel reads vercel.json from the project's
+# Root Directory, apps/site, not from the repo root), so nothing deploys
+# automatically on push. Instead the `deploy` job below promotes main to
+# production via the Vercel CLI, and only after Quality and Build pass
+# (`needs`) — untested code never reaches production.
 #
 # Preview deploys for feature branches are opt-in: comment `/deploy` on a PR to
 # trigger deploy-preview.yml. No other branch deploys.

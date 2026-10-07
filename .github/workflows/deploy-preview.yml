@@ -1,9 +1,9 @@
 # On-demand preview deploys.
 #
-# Vercel Git auto-deploys are off (vercel.json). To preview a PR, comment
-# `/deploy` on it. This builds the PR head, deploys a Vercel preview, then
-# aliases that deploy to ONE fixed URL (PREVIEW_ALIAS) so the preview link is
-# always the same no matter which PR was deployed. Whichever PR deploys last
+# Vercel Git auto-deploys are off (apps/site/vercel.json). To preview a PR,
+# comment `/deploy` on it. This builds the PR head, deploys a Vercel preview,
+# then aliases that deploy to ONE fixed URL (PREVIEW_ALIAS) so the preview link
+# is always the same no matter which PR was deployed. Whichever PR deploys last
 # owns the alias. Only repo owners/members/collaborators can trigger it, so
 # outside contributors can't spend build minutes or leak secrets.
 #
