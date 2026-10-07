@@ -5,6 +5,10 @@ import MobileNav from "@/components/MobileNav.svelte";
 // is re-validated on each load (`max-age=0`), so as a request it painted a
 // beat after the header text and popped in. Derived by scripts/build-header-assets.ts.
 import logoSrc from "@/assets/logo-144.png?inline";
+// The file globals.css's Jua @font-face points at, so the preload below and
+// that url() resolve to the same fingerprinted /_astro/ URL; if they differed
+// the browser would fetch the font twice.
+import juaUrl from "@/assets/fonts/Jua-Latin.woff2?url";
 import { APP_NAME } from "@/lib/appConfig";
 import { OG_ALT, OG_SIZE } from "@/lib/og/card";
 // Which nav item is the page the visitor is on. Trailing slash stripped so
@@ -76,7 +80,7 @@ const ogImage = new URL("/opengraph-image.png", Astro.site).href;
     <meta name="format-detection" content="telephone=no" />
 
     <!-- Performance Resource Hints -->
-    <link rel="preload" href="/fonts/Jua-Latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href={juaUrl} as="font" type="font/woff2" crossorigin />
 
     <!-- Per-page head additions. Map pages pass `MapAssets` here, which is what
          warms the tile host and pulls the engine download forward; pages

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build",
+    "build": "astro build && tsx scripts/patch-vercel-routes.ts",
     "preview": "astro preview",
     "lint": "eslint",
     "map:placeholders": "tsx scripts/build-map-placeholders.ts",
