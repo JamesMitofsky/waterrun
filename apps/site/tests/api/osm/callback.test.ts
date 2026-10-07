@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { GET } from "@/pages/api/osm/callback";
 import { SCHEME } from "@/lib/appConfig";
-import { json } from "../../helpers/upstream";
+import { json, text } from "../../helpers/upstream";
 import { fakeCookies, routeContext } from "../../helpers/route";
 
 const transient = { osm_pkce: "verifier", osm_state: "s1" };
@@ -47,5 +47,14 @@ describe("GET /api/osm/callback", () => {
     fetchMock.mockResolvedValueOnce(json({ access_token: "tok" }));
     const { res } = await callback({ ...transient, osm_return: "/\t/evil.com" });
     expect(res.headers.get("Location")).toBe("https://waterrun.app/?osm=ok");
+  });
+
+  it("explains a failed exchange without echoing OSM's error page", async () => {
+    fetchMock.mockResolvedValueOnce(text("<html><body>Internal error</body></html>", 500));
+    const { res, deleted } = await callback(transient);
+    const location = new URL(res.headers.get("Location")!);
+    expect(location.searchParams.get("osm")).toBe("error");
+    expect(location.searchParams.get("msg")).toBe("OSM sign-in failed (500)");
+    expect(deleted.has("osm_pkce")).toBe(true);
   });
 });

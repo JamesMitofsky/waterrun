@@ -1,5 +1,6 @@
 import type { APIRoute } from "astro";
-import { exchangeToken, safeReturnPath } from "@/lib/osm";
+import { exchangeToken, OsmApiError, safeReturnPath } from "@/lib/osm";
+import { UpstreamNetworkError, UpstreamTimeoutError } from "@/lib/upstream";
 import { SCHEME } from "@/lib/appConfig";
 
 export const prerender = false;
@@ -7,6 +8,15 @@ export const prerender = false;
 // The app's deep link back from sign-in. Built from the shared config so it
 // can't drift from the scheme the app actually registers.
 const NATIVE_CALLBACK = `${SCHEME}://osm-callback`;
+
+// Why the token exchange failed, in words fit for the sign-in error screen.
+// OSM's own reply stays out of it: it can be an HTML error page.
+function signInFailure(e: unknown): string {
+  if (e instanceof UpstreamTimeoutError) return "OSM sign-in timed out. Please try again.";
+  if (e instanceof UpstreamNetworkError) return "Couldn't reach OpenStreetMap. Please try again.";
+  if (e instanceof OsmApiError) return `OSM sign-in failed (${e.status})`;
+  return "OSM sign-in failed";
+}
 
 // OAuth2 redirect target: verify state, exchange code, deliver the token.
 //   web    → store it in an httpOnly cookie, bounce to the app.
@@ -64,6 +74,6 @@ export const GET: APIRoute = async ({ request, cookies }) => {
     });
     return redirectTo(dest.toString());
   } catch (e) {
-    return fail((e as Error).message);
+    return fail(signInFailure(e));
   }
 };

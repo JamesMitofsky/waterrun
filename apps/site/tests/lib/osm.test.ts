@@ -1,5 +1,6 @@
 import crypto from "crypto";
-import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { USER_AGENT } from "@rosm/core/identity";
 import {
   API_BASE,
   OAUTH_BASE,
@@ -13,14 +14,23 @@ import {
   exchangeToken,
   getNode,
   getNodeVersion,
+  getUserDetails,
   isChangesetClosed,
+  isChangesetNotOwned,
+  isChangesetUnusable,
+  isVersionConflict,
   makePkce,
   openChangeset,
+  osmFailure,
   putNode,
   safeReturnPath,
+  sameTags,
+  surveyDateFor,
   todayIso,
 } from "@/lib/osm";
 import { APP_NAME } from "@/lib/appConfig";
+import { UpstreamNetworkError, UpstreamTimeoutError } from "@/lib/upstream";
+import { fakeTimeoutSignals, hangingFetch } from "../helpers/upstream";
 
 const T = "2026-01-02";
 
@@ -275,12 +285,22 @@ describe("exchangeToken", () => {
     expect(body.get("code")).toBe("code-1");
     expect(body.get("code_verifier")).toBe("verifier-1");
     expect(body.get("redirect_uri")).toBe("https://app.test/cb");
+    expect(init.headers["User-Agent"]).toBe(USER_AGENT);
   });
 
-  it("throws with status + body on failure", async () => {
+  it("throws an OsmApiError with the status on failure", async () => {
     mockFetch(text("bad grant", 400));
-    await expect(exchangeToken("c", "v", "https://app.test/cb")).rejects.toThrow(
-      "token exchange 400: bad grant",
+    await expect(exchangeToken("c", "v", "https://app.test/cb")).rejects.toMatchObject({
+      name: "OsmApiError",
+      status: 400,
+      body: "bad grant",
+    });
+  });
+
+  it("refuses a reply that carries no token", async () => {
+    mockFetch(json({ token_type: "Bearer" }));
+    await expect(exchangeToken("c", "v", "https://app.test/cb")).rejects.toBeInstanceOf(
+      OsmApiError,
     );
   });
 });
@@ -301,6 +321,7 @@ describe("changesets", () => {
     expect(init.method).toBe("PUT");
     expect(init.headers.Authorization).toBe("Bearer tok");
     expect(init.headers["Content-Type"]).toBe("text/xml");
+    expect(init.headers["User-Agent"]).toBe(USER_AGENT);
     expect(init.body).toContain(`<tag k="created_by" v="${APP_NAME}"/>`);
     expect(init.body).toContain('<tag k="comment" v="Survey run"/>');
   });
@@ -318,6 +339,14 @@ describe("changesets", () => {
     expect(err).toBeInstanceOf(OsmApiError);
     expect(err.status).toBe(401);
     expect(err.message).toBe("open changeset 401: nope");
+  });
+
+  it("keeps an HTML error page out of the message but on the error", async () => {
+    const page = "<html><body><h1>502 Bad Gateway</h1></body></html>";
+    fetchMock.mockResolvedValueOnce(text(page, 502));
+    const err = await openChangeset("tok", "c").catch((e) => e);
+    expect(err.message).toBe("open changeset 502");
+    expect(err.body).toBe(page);
   });
 
   it("closeChangeset PUTs to the close endpoint", async () => {
@@ -354,6 +383,40 @@ describe("changesets", () => {
     it("rejects other statuses and plain errors", () => {
       expect(isChangesetClosed(new OsmApiError(404, "put node", "was closed"))).toBe(false);
       expect(isChangesetClosed(new Error("The changeset 9 was closed"))).toBe(false);
+    });
+  });
+
+  describe("409 flavors", () => {
+    const closed = new OsmApiError(
+      409,
+      "put node",
+      "The changeset 9 was closed at 2026-06-30 UTC.",
+    );
+    const notOwned = new OsmApiError(409, "put node", "The user doesn't own that changeset");
+    const mismatch = new OsmApiError(
+      409,
+      "put node",
+      "Version mismatch: Provided 3, server had: 4 of Node 123",
+    );
+
+    it("tells a changeset of another account apart from a version conflict", () => {
+      expect(isChangesetNotOwned(notOwned)).toBe(true);
+      expect(isChangesetNotOwned(mismatch)).toBe(false);
+      expect(isVersionConflict(notOwned)).toBe(false);
+    });
+
+    it("treats a closed or foreign changeset as unusable, and nothing else", () => {
+      expect(isChangesetUnusable(closed)).toBe(true);
+      expect(isChangesetUnusable(notOwned)).toBe(true);
+      expect(isChangesetUnusable(mismatch)).toBe(false);
+    });
+
+    it("matches only a real version mismatch as a version conflict", () => {
+      expect(isVersionConflict(mismatch)).toBe(true);
+      expect(isVersionConflict(closed)).toBe(false);
+      expect(isVersionConflict(new OsmApiError(412, "delete node", "Version mismatch"))).toBe(
+        false,
+      );
     });
   });
 
@@ -415,6 +478,12 @@ describe("nodes", () => {
     );
   });
 
+  it("putNode names the app in its User-Agent", async () => {
+    fetchMock.mockResolvedValueOnce(text("2"));
+    await putNode("tok", 1, { version: 1, lat: 0, lon: 0, tags: {} }, 42);
+    expect(fetchMock.mock.calls[0][1].headers["User-Agent"]).toBe(USER_AGENT);
+  });
+
   it("putNode throws OsmApiError on conflict", async () => {
     fetchMock.mockResolvedValueOnce(text("version mismatch", 409));
     await expect(
@@ -471,6 +540,112 @@ describe("nodes", () => {
   });
 });
 
+describe("timeouts", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("gives up on a node read that never answers", async () => {
+    vi.useFakeTimers();
+    fakeTimeoutSignals();
+    vi.stubGlobal("fetch", hangingFetch());
+    const p = getNode("tok", 1);
+    const assertion = expect(p).rejects.toBeInstanceOf(UpstreamTimeoutError);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await assertion;
+  });
+
+  it("gives a write longer before giving up", async () => {
+    vi.useFakeTimers();
+    fakeTimeoutSignals();
+    vi.stubGlobal("fetch", hangingFetch());
+    const p = putNode("tok", 1, { version: 1, lat: 0, lon: 0, tags: {} }, 42);
+    let settled = false;
+    p.catch(() => {}).finally(() => (settled = true));
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(settled).toBe(false);
+    const assertion = expect(p).rejects.toBeInstanceOf(UpstreamTimeoutError);
+    await vi.advanceTimersByTimeAsync(20_000);
+    await assertion;
+  });
+});
+
+describe("getUserDetails", () => {
+  it("reads the user object with the token", async () => {
+    const fetchMock = mockFetch(json({ user: { id: 7, display_name: "ann" } }));
+    expect(await getUserDetails("tok")).toEqual({ id: 7, display_name: "ann" });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(`${API_BASE}/api/0.6/user/details.json`);
+    expect(init.headers.Authorization).toBe("Bearer tok");
+    expect(init.headers["User-Agent"]).toBe(USER_AGENT);
+  });
+
+  it("throws OsmApiError when OSM refuses the token", async () => {
+    mockFetch(text("unauthorized", 401));
+    await expect(getUserDetails("tok")).rejects.toMatchObject({ status: 401 });
+  });
+});
+
+describe("osmFailure", () => {
+  const api = (status: number, body = "reason") => new OsmApiError(status, "put node", body);
+
+  it.each([
+    [400, 400],
+    [401, 401],
+    [403, 403],
+    [404, 404],
+    [410, 410],
+    [409, 409],
+    [412, 409],
+    [429, 429],
+    [500, 502],
+    [503, 502],
+    [418, 502],
+  ])("maps an OSM %i to %i", (osm, ours) => {
+    expect(osmFailure(api(osm)).status).toBe(ours);
+  });
+
+  it("maps a timeout to 504 and a network failure to 503, both retryable", () => {
+    expect(osmFailure(new UpstreamTimeoutError("https://api.test/x", 10))).toMatchObject({
+      status: 504,
+      retryable: true,
+    });
+    expect(
+      osmFailure(new UpstreamNetworkError("https://api.test/x", new TypeError("fetch failed"))),
+    ).toMatchObject({ status: 503, retryable: true });
+  });
+
+  it("marks only transient failures retryable", () => {
+    expect(osmFailure(api(429)).retryable).toBe(true);
+    expect(osmFailure(api(500)).retryable).toBe(true);
+    expect(osmFailure(api(409)).retryable).toBe(false);
+    expect(osmFailure(api(401)).retryable).toBe(false);
+  });
+
+  it("keeps OSM's own reason for a rejected change", () => {
+    expect(osmFailure(api(409, "Version mismatch: Provided 3")).error).toContain(
+      "Version mismatch: Provided 3",
+    );
+  });
+
+  it("reports anything unexpected as a 502", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(osmFailure(new SyntaxError("Unexpected token <")).status).toBe(502);
+  });
+});
+
+describe("sameTags", () => {
+  it("ignores key order", () => {
+    expect(sameTags({ a: "1", b: "2" }, { b: "2", a: "1" })).toBe(true);
+  });
+
+  it("notices a changed, added or removed tag", () => {
+    expect(sameTags({ a: "1" }, { a: "2" })).toBe(false);
+    expect(sameTags({ a: "1" }, { a: "1", b: "2" })).toBe(false);
+    expect(sameTags({ a: "1", b: "2" }, { a: "1" })).toBe(false);
+  });
+});
+
 describe("safeReturnPath", () => {
   const origin = "https://waterrun.app";
 
@@ -507,5 +682,35 @@ describe("safeReturnPath", () => {
 describe("todayIso", () => {
   it("returns today as YYYY-MM-DD", () => {
     expect(todayIso()).toBe(new Date().toISOString().slice(0, 10));
+  });
+
+  it("uses the UTC date", () => {
+    expect(todayIso(new Date("2026-10-08T01:30:00Z"))).toBe("2026-10-08");
+  });
+});
+
+describe("surveyDateFor", () => {
+  const now = new Date("2026-10-08T02:30:00Z"); // 22:30 the evening before in DC
+
+  it("takes the surveyor's own date over the server's", () => {
+    expect(surveyDateFor({ surveyDate: "2026-10-07" }, now)).toBe("2026-10-07");
+  });
+
+  it("accepts a queued edit synced weeks later, up to 30 days", () => {
+    expect(surveyDateFor({ surveyDate: "2026-09-08" }, now)).toBe("2026-09-08");
+    expect(surveyDateFor({ surveyDate: "2026-09-07" }, now)).toBe("2026-10-08");
+  });
+
+  it("allows a date one day ahead for zones east of UTC, and no further", () => {
+    expect(surveyDateFor({ surveyDate: "2026-10-09" }, now)).toBe("2026-10-09");
+    expect(surveyDateFor({ surveyDate: "2026-10-10" }, now)).toBe("2026-10-08");
+  });
+
+  it("falls back to the server's date when the field is missing or malformed", () => {
+    expect(surveyDateFor({}, now)).toBe("2026-10-08");
+    expect(surveyDateFor(undefined, now)).toBe("2026-10-08");
+    expect(surveyDateFor({ surveyDate: "2026-02-30" }, now)).toBe("2026-10-08");
+    expect(surveyDateFor({ surveyDate: "2026-10-07T12:00:00Z" }, now)).toBe("2026-10-08");
+    expect(surveyDateFor({ surveyDate: 20261007 }, now)).toBe("2026-10-08");
   });
 });

@@ -10,10 +10,12 @@ import {
   deleteNode,
   changesetUrl,
   OsmApiError,
-  isChangesetClosed,
+  isChangesetUnusable,
+  logOsmWrite,
+  osmFailure,
   type NodeData,
 } from "@/lib/osm";
-import { appendJson } from "@/lib/db";
+import { readJsonBody } from "@/lib/requestBody";
 
 export const prerender = false;
 
@@ -21,10 +23,11 @@ const CHANGESET_COMMENT = "Revert: undo survey update";
 
 // One revert write. Edits restore the tags of the version before ours (position
 // and current version stay as-is); creates delete the node outright. Recovers
-// once from a closed changeset (idle timeout, or an id persisted from a finished
-// session) — but never retries a version conflict: by the time we're here the
-// version was checked, so a fresh 409 means a concurrent editor won the race and
-// the undo must abort rather than clobber their work.
+// once from a changeset that can't take the write (closed by idle timeout, an
+// id persisted from a finished session, or another OSM account's) — but never
+// retries a version conflict: by the time we're here the version was checked,
+// so a fresh 409 means a concurrent editor won the race and the undo must abort
+// rather than clobber their work.
 async function revertWithRetry(
   token: string,
   req: z.infer<typeof RevertRequest>,
@@ -42,7 +45,7 @@ async function revertWithRetry(
       newVersion: await putNode(token, req.nodeId, { ...current, tags: prev.tags }, changesetId),
     };
   } catch (e) {
-    if (isChangesetClosed(e) && !reopened) {
+    if (isChangesetUnusable(e) && !reopened) {
       const fresh = await openChangeset(token, CHANGESET_COMMENT);
       return revertWithRetry(token, req, current, fresh, true);
     }
@@ -54,7 +57,7 @@ export const POST: APIRoute = async ({ request }) => {
   const token = await getOsmToken(request);
   if (!token) return Response.json({ error: "not signed in to OSM" }, { status: 401 });
 
-  const parsed = RevertRequest.safeParse(await request.json());
+  const parsed = RevertRequest.safeParse(await readJsonBody(request));
   if (!parsed.success) {
     return Response.json({ error: z.flattenError(parsed.error) }, { status: 400 });
   }
@@ -88,14 +91,7 @@ export const POST: APIRoute = async ({ request }) => {
       current,
       initialChangeset,
     );
-
-    await appendJson("edit-log.json", {
-      nodeId,
-      action: "revert",
-      changesetId,
-      newVersion,
-      at: new Date().toISOString(),
-    });
+    logOsmWrite({ nodeId, action: "revert", changesetId, newVersion });
 
     return Response.json({
       changesetId,
@@ -104,6 +100,7 @@ export const POST: APIRoute = async ({ request }) => {
       newVersion,
     });
   } catch (e) {
-    return Response.json({ error: (e as Error).message }, { status: 502 });
+    const { status, error, retryable } = osmFailure(e);
+    return Response.json({ error, retryable }, { status });
   }
 };
