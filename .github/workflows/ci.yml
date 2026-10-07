@@ -26,7 +26,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  NEXT_TELEMETRY_DISABLED: "1"
+  # Astro still records build telemetry in CI (it only skips the notice).
+  ASTRO_TELEMETRY_DISABLED: "1"
 
 jobs:
   quality:
