@@ -150,9 +150,9 @@ export class RouteError extends Error {
   }
 }
 
-// BRouter's own errors are one line of plain text ("no track found at
-// pass=0"), worth showing. A proxy in front of it answers with an HTML page or
-// a stack trace instead, which must never reach the user.
+// BRouter's routing errors are typically a line of plain text ("no track found
+// at pass=0"), worth showing. A proxy in front of it answers with an HTML page,
+// and a crash with a stack trace; neither may reach the user.
 function errorDetail(body: string): string {
   const text = body.trim();
   if (!text || text.includes("<") || text.includes("\n")) return "";
