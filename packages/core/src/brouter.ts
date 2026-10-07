@@ -1,10 +1,21 @@
 // Foot routing via BRouter public API (free, no key). Returns street geometry + distance.
 import { bearing, haversine, type Pt } from "./geo";
 import { env } from "./env";
+import { isTransientStatus } from "./apiResponse";
+import { USER_AGENT } from "./identity";
 
 const BROUTER_URL = env("BROUTER_URL") || "https://brouter.de/brouter";
 // Foot profile available on the public brouter.de server.
 const BROUTER_PROFILE = env("BROUTER_PROFILE") || "hiking-beta";
+
+// brouter.de is one volunteer server and often overloaded. A long multi-stop
+// route can legitimately take tens of seconds, so this is a ceiling against a
+// hung connection rather than a budget: without it the request (and the
+// planner's "routing" spinner) lasts until the platform kills the function.
+const BROUTER_TIMEOUT_MS = 40_000;
+
+// Longest upstream error text worth passing on to the user.
+const ERROR_DETAIL_MAX = 200;
 
 // A turn-by-turn maneuver, precomputed from the route geometry so the live HUD can
 // just pick the next one by distance. `angle` is the heading change at the vertex
@@ -122,26 +133,81 @@ function extractTurns(coords: [number, number][], named: NamedPoint[]): Turn[] {
 // A routing failure we can explain to the user. `island` is set when BRouter
 // reports a point it can't connect to the foot network ("target island"); it
 // carries that point's coords so the UI can highlight it on the map.
+// `retryable` is true when the same request can succeed later (BRouter busy,
+// slow or unreachable), so the UI offers a retry rather than asking the user to
+// change the route.
 export class RouteError extends Error {
   island?: Pt;
-  constructor(message: string, island?: Pt) {
+  retryable: boolean;
+  constructor(
+    message: string,
+    { island, retryable = false }: { island?: Pt; retryable?: boolean } = {},
+  ) {
     super(message);
     this.name = "RouteError";
     this.island = island;
+    this.retryable = retryable;
   }
 }
 
-// points must be in visit order; loop appends start at the end.
-export async function footRoute(points: Pt[], loop: boolean): Promise<FootRoute> {
+// BRouter's own errors are one line of plain text ("no track found at
+// pass=0"), worth showing. A proxy in front of it answers with an HTML page or
+// a stack trace instead, which must never reach the user.
+function errorDetail(body: string): string {
+  const text = body.trim();
+  if (!text || text.includes("<") || text.includes("\n")) return "";
+  return text.length > ERROR_DETAIL_MAX ? `${text.slice(0, ERROR_DETAIL_MAX)}…` : text;
+}
+
+type BRouterGeoJson = {
+  features?: {
+    geometry?: { coordinates?: [number, number][] };
+    properties?: { "track-length"?: string; messages?: string[][] };
+  }[];
+};
+
+// points must be in visit order; loop appends start at the end. `signal` lets
+// the caller abandon the request (e.g. its own client went away).
+export async function footRoute(
+  points: Pt[],
+  loop: boolean,
+  signal?: AbortSignal,
+): Promise<FootRoute> {
   const seq = loop ? [...points, points[0]] : points;
   const lonlats = seq.map((p) => `${p.lon},${p.lat}`).join("|");
   const url =
     `${BROUTER_URL}?lonlats=${lonlats}` +
     `&profile=${BROUTER_PROFILE}&alternativeidx=0&format=geojson`;
 
-  const res = await fetch(url);
+  // The timeout covers the body too: a server can send headers and then stall.
+  const ctrl = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    ctrl.abort();
+  }, BROUTER_TIMEOUT_MS);
+  const onCallerAbort = () => ctrl.abort();
+  if (signal?.aborted) ctrl.abort();
+  else signal?.addEventListener("abort", onCallerAbort, { once: true });
+  let res: Response;
+  let body: string;
+  try {
+    res = await fetch(url, { headers: { "User-Agent": USER_AGENT }, signal: ctrl.signal });
+    body = await res.text();
+  } catch (e) {
+    if (signal?.aborted && !timedOut) throw e;
+    throw new RouteError(
+      timedOut
+        ? "The routing server took too long to answer. Please try again in a moment."
+        : "Couldn't reach the routing server. Please try again in a moment.",
+      { retryable: true },
+    );
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", onCallerAbort);
+  }
+
   if (!res.ok) {
-    const body = await res.text();
     // "target island detected for section N" => waypoint N (1-based leg, whose
     // target endpoint is seq[N]) can't be reached on foot. Map it back to the
     // offending point so the UI can show *where* the route breaks.
@@ -151,21 +217,32 @@ export async function footRoute(points: Pt[], loop: boolean): Promise<FootRoute>
       const p = seq[idx];
       throw new RouteError(
         "A point on your route can't be reached on foot — it sits on an isolated path with no walkable connection to the rest of the route.",
-        { lat: p.lat, lon: p.lon },
+        { island: { lat: p.lat, lon: p.lon } },
       );
     }
-    throw new RouteError(`Routing failed (BRouter ${res.status}). ${body}`.trim());
+    const detail = errorDetail(body);
+    const status = detail ? `BRouter ${res.status}: ${detail}` : `BRouter ${res.status}`;
+    if (isTransientStatus(res.status)) {
+      throw new RouteError(
+        `The routing server is busy or unavailable (${status}). Please try again in a moment.`,
+        { retryable: true },
+      );
+    }
+    throw new RouteError(`Routing failed (${status}).`);
   }
-  const gj = (await res.json()) as {
-    features: {
-      geometry: { coordinates: [number, number][] };
-      properties: { "track-length"?: string; messages?: string[][] };
-    }[];
-  };
+  let gj: BRouterGeoJson;
+  try {
+    gj = JSON.parse(body) as BRouterGeoJson;
+  } catch {
+    // A 200 that isn't GeoJSON came from something in between, not BRouter.
+    throw new RouteError("The routing server sent an unreadable reply. Please try again.", {
+      retryable: true,
+    });
+  }
   const feat = gj.features?.[0];
-  if (!feat) throw new RouteError("BRouter returned no route");
-  const distanceM = Number(feat.properties["track-length"] ?? 0);
-  const coords = feat.geometry.coordinates;
-  const turns = extractTurns(coords, parseNamedPoints(feat.properties.messages));
+  const coords = feat?.geometry?.coordinates;
+  if (!coords) throw new RouteError("BRouter returned no route");
+  const distanceM = Number(feat.properties?.["track-length"] ?? 0);
+  const turns = extractTurns(coords, parseNamedPoints(feat.properties?.messages));
   return { coords, distanceM, turns };
 }
