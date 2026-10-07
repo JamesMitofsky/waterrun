@@ -34,3 +34,12 @@ minimumReleaseAgeExclude:
   - expo-splash-screen@57.0.5
   - expo-task-manager@57.0.6
   - expo-web-browser@57.0.2
+# React Native libraries ship .d.ts files that import "react" while only
+# peer-depending on it, so TypeScript finds React's types by walking up to an
+# ancestor node_modules/@types. Hoisting the mobile app's own @types/react to
+# the root makes that walk land on the copy the app compiles against, rather
+# than on a stray root devDependency or whatever pnpm happens to hoist
+# privately (which an existing install does not redo when that dependency
+# disappears).
+publicHoistPattern:
+  - "@types/react"
