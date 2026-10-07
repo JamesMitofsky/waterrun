@@ -234,9 +234,12 @@ body {
 }
 
 /* Scroll-reveal (was framer-motion fadeUp). Blocks start hidden + shifted, then
-   the IntersectionObserver adds .in-view to animate to rest. No-JS/reduced-motion
-   fallback keeps everything visible. */
-.reveal {
+   index.astro's IntersectionObserver adds .in-view to animate them to rest.
+   Hidden only under `.js`, which an inline script in Layout's head sets on
+   <html> before first paint: when scripts never run, nothing would add
+   .in-view, so the blocks just render in place. Reduced motion shows them at
+   rest. */
+.js .reveal {
   opacity: 0;
   transform: translateY(24px);
   will-change: transform, opacity;
@@ -244,15 +247,33 @@ body {
     opacity 0.55s cubic-bezier(0.22, 1, 0.36, 1),
     transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
 }
-.reveal.in-view {
+.js .reveal.in-view {
   opacity: 1;
   transform: none;
 }
+/* The same entrance for the blocks already on screen at load (the hero), as an
+   animation that starts with first paint rather than when the observer's
+   script gets to run. Same curve, distance and length; `--reveal-delay` stands
+   in for the stagger `transition-delay` gave. `backwards` holds the hidden
+   frame through the delay, and the end frame is the element's own style, so
+   nothing stays applied afterwards. Needs no JS. */
+@keyframes reveal-in {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+}
+.reveal-now {
+  animation: reveal-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) var(--reveal-delay, 0s) backwards;
+}
 @media (prefers-reduced-motion: reduce) {
-  .reveal {
+  .js .reveal {
     opacity: 1;
     transform: none;
     transition: none;
+  }
+  .reveal-now {
+    animation: none;
   }
 }
 

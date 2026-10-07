@@ -72,6 +72,15 @@ const ogImage = new URL("/opengraph-image.png", Astro.site).href;
       name="viewport"
       content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"
     />
+    {
+      /* Marks the document as scripted before first paint, so CSS can hide what
+        a script will later reveal (`.js .reveal` in globals.css) without hiding
+        it from visitors whose scripts never run. Inline and classic on purpose:
+        a module, or a file to fetch, would run after the first paint. */
+    }
+    <script is:inline>
+      document.documentElement.classList.add("js");
+    </script>
     <title>{title}</title>
     <meta name="description" content={description} />
     {noindex && <meta name="robots" content="noindex" />}
