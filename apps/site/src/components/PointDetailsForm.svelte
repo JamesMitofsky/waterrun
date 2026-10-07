@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
-  import { Snowflake } from "phosphor-svelte";
+  import SnowflakeIcon from "phosphor-svelte/lib/SnowflakeIcon";
   import type { Audience, Dispenser, EditExtras } from "@rosm/core/schemas";
   import { NOTE_MAX, hasQuickTag, normalizeNote, toggleQuickTag } from "@rosm/core/note";
   import { audienceFromTags } from "@/lib/audience";
@@ -100,7 +100,7 @@
             <span class="text-[11px] font-medium text-neutral-500">Runs only part of the year</span>
           </div>
         </div>
-        <Snowflake
+        <SnowflakeIcon
           size={18}
           class={seasonal ? "text-sky-600" : "text-neutral-400"}
           weight={seasonal ? "fill" : "regular"}
