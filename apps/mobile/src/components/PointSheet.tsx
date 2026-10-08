@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Linking, Pressable, Text, View } from "react-native";
 import { ArrowSquareOutIcon } from "phosphor-react-native/src/icons/ArrowSquareOut";
 import { CheckCircleIcon } from "phosphor-react-native/src/icons/CheckCircle";
@@ -66,7 +66,11 @@ const ACTIONS: ActionButton[] = [
 type Props = {
   fountain: Fountain;
   edit?: PointEdit;
-  onAction: (action: SurveyAction, extras?: EditExtras) => void;
+  // May return a promise, for an action that can fail where the user can't
+  // simply come back to it (adding a new point): the form then stays open with
+  // what was entered until it resolves, and a rejection's message shows under
+  // it so the user can try again.
+  onAction: (action: SurveyAction, extras?: EditExtras) => void | Promise<void>;
   inRoute?: boolean;
   onToggleRoute?: () => void;
 };
@@ -74,12 +78,37 @@ type Props = {
 export function PointSheet({ fountain, edit, onAction, inRoute, onToggleRoute }: Props) {
   const tags = fountain.tags ?? {};
   const [detailFor, setDetailFor] = useState<"confirm" | "problem" | "removed" | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+  // Set synchronously, so a second tap before the re-render can't submit twice.
+  const inFlight = useRef(false);
 
   const [prevId, setPrevId] = useState(fountain.id);
   if (prevId !== fountain.id) {
     setPrevId(fountain.id);
     setDetailFor(null);
+    setFailure(null);
   }
+
+  const submit = async (action: SurveyAction, extras?: EditExtras) => {
+    if (inFlight.current) return;
+    const result = onAction(action, extras);
+    if (result instanceof Promise) {
+      inFlight.current = true;
+      setSaving(true);
+      setFailure(null);
+      try {
+        await result;
+      } catch (e) {
+        setFailure(e instanceof Error ? e.message : String(e));
+        return;
+      } finally {
+        inFlight.current = false;
+        setSaving(false);
+      }
+    }
+    setDetailFor(null);
+  };
 
   const byAction = (action: ActionButton["action"]) => ACTIONS.find((a) => a.action === action)!;
 
@@ -157,19 +186,28 @@ export function PointSheet({ fountain, edit, onAction, inRoute, onToggleRoute }:
           ) : null}
         </View>
       ) : detailFor ? (
-        <PointDetailsForm
-          tags={tags}
-          submitLabel={detailFor === "confirm" ? "Confirm working" : "Confirm removed"}
-          SubmitIcon={detailFor === "confirm" ? CheckCircleIcon : TrashIcon}
-          submitBox={detailFor === "confirm" ? "bg-green-600" : "bg-red-600"}
-          isRemoved={detailFor === "removed"}
-          isProblem={detailFor === "problem"}
-          onCancel={() => setDetailFor(null)}
-          onSubmit={(extras, action) => {
-            onAction(action ?? (detailFor as SurveyAction), extras);
-            setDetailFor(null);
-          }}
-        />
+        <>
+          <PointDetailsForm
+            tags={tags}
+            submitLabel={detailFor === "confirm" ? "Confirm working" : "Confirm removed"}
+            SubmitIcon={detailFor === "confirm" ? CheckCircleIcon : TrashIcon}
+            submitBox={detailFor === "confirm" ? "bg-green-600" : "bg-red-600"}
+            isRemoved={detailFor === "removed"}
+            isProblem={detailFor === "problem"}
+            onCancel={() => {
+              setDetailFor(null);
+              setFailure(null);
+            }}
+            onSubmit={(extras, action) =>
+              void submit(action ?? (detailFor as SurveyAction), extras)
+            }
+          />
+          {saving ? (
+            <Text className="text-muted text-sm font-semibold">Saving…</Text>
+          ) : failure ? (
+            <Text className="text-sm font-semibold text-red-600">{failure}</Text>
+          ) : null}
+        </>
       ) : (
         <View className="gap-5 py-1">
           {renderAction(byAction("confirm"), "py-8")}

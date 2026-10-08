@@ -10,11 +10,12 @@ import {
 import { compass, type Pt } from "@rosm/core/geo";
 import { ptLabel } from "@rosm/core/pointTypes";
 import { STATUS_COLOR } from "@rosm/core/editStatus";
+import { todayLocal } from "@rosm/core/editSummary";
+import { callApi, postJson, UNEXPECTED_REPLY } from "@rosm/core/apiCall";
 import { activeRunToResume, archiveRun, beginRun } from "@rosm/core/runLifecycle";
 import { progressLine } from "@rosm/core/runProgress";
 import type { EditAction, EditExtras, Fountain } from "@rosm/core/schemas";
 import type { SurveyAction } from "../components/PointSheet";
-import { api } from "../ports/api";
 import { getToken } from "../auth/authStore";
 import { useOsmStatus } from "../auth/useOsmStatus";
 import { trackRun } from "../tasks/runLocationTask";
@@ -38,6 +39,18 @@ const SAVED_LABEL: Record<SurveyAction, string> = {
   removed: "Removed",
 };
 
+// Same ceiling as an outbox send: a create that hangs on a dead cell must give
+// the add sheet its error back rather than spin.
+const CREATE_TIMEOUT_MS = 30_000;
+
+type CreatedNode = {
+  nodeId: number;
+  changesetId: number;
+  lat: number;
+  lon: number;
+  tags: Record<string, string>;
+};
+
 // The Expo run session: live GPS, the shared guidance derived from it, the OSM
 // recording actions, and marker DATA for RosmMap. Mirrors the web useRunSession
 // but returns markers as plain data (the screen owns the bottom sheet). Ending
@@ -47,7 +60,6 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
   const { status: osm } = useOsmStatus();
   const [pos, setPos] = useState<Pt | null>(null);
   const [manualArrived, setManualArrived] = useState(false);
-  const [adding, setAdding] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [hydrating, setHydrating] = useState(() => enabled && !useRun.getState().hasPlan);
   const [nothingToResume, setNothingToResume] = useState(false);
@@ -213,44 +225,41 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
     archiveRun(pi);
   }, [index, stops, run]);
 
-  // Create a brand-new node of the surveyed type at a given spot (GPS position or tapped map location).
+  // Create a brand-new node of the surveyed type at a given spot (GPS position
+  // or tapped map location). Rejects with a message fit for the user, so the
+  // add sheet can keep what was entered for another try. Sent straight away,
+  // not queued like an edit: a create resent after a reply that was lost would
+  // add the point twice.
   const addAt = useCallback(
-    async (at: { lat: number; lon: number }, extras?: EditExtras) => {
+    async (at: { lat: number; lon: number }, extras?: EditExtras): Promise<void> => {
       // The token is the sign-in: the status endpoint can't tell signed out
       // from offline.
-      if (!getToken()) {
-        setErr("Sign in to OSM first.");
-        return;
-      }
-      setAdding(true);
+      if (!getToken()) throw new Error("Sign in to OSM first.");
       setErr(null);
       setLastSaved(null);
-      try {
-        const r = await api.apiFetch("/api/osm/create", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            lat: at.lat,
-            lon: at.lon,
-            tag: { key: tagKey, value: tagValue },
-            changesetId: useOutbox.getState().changesetId,
-            extras,
-          }),
-        });
-        const j = await r.json();
-        if (!r.ok) throw new Error(j.error || "create failed");
-        useOutbox.getState().setChangeset(j.changesetId);
-        run.setChangeset(j.changesetId);
-        run.addNode({ id: j.nodeId, lat: j.lat, lon: j.lon, tags: j.tags });
-        celebratePoint();
-        hapticSuccess();
-        setLastSaved({ nodeId: j.nodeId, label: "Added" });
-        archiveRun(index);
-      } catch (e) {
-        setErr((e as Error).message);
-      } finally {
-        setAdding(false);
-      }
+      const reply = await callApi<CreatedNode>(
+        "/api/osm/create",
+        postJson({
+          lat: at.lat,
+          lon: at.lon,
+          tag: { key: tagKey, value: tagValue },
+          changesetId: useOutbox.getState().changesetId,
+          extras,
+          surveyDate: todayLocal(),
+        }),
+        CREATE_TIMEOUT_MS,
+        "Couldn't add the point. Please try again.",
+      );
+      if (!reply.ok) throw new Error(reply.message);
+      const j = reply.data;
+      if (typeof j?.nodeId !== "number") throw new Error(UNEXPECTED_REPLY);
+      useOutbox.getState().setChangeset(j.changesetId);
+      run.setChangeset(j.changesetId);
+      run.addNode({ id: j.nodeId, lat: j.lat, lon: j.lon, tags: j.tags });
+      celebratePoint();
+      hapticSuccess();
+      setLastSaved({ nodeId: j.nodeId, label: "Added" });
+      archiveRun(index);
     },
     [tagKey, tagValue, run, index],
   );
@@ -260,7 +269,7 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
       setErr("Waiting for GPS fix.");
       return;
     }
-    await addAt(pos);
+    await addAt(pos).catch((e: Error) => setErr(e.message));
   }, [pos, addAt]);
 
   const endEarly = useCallback(() => {
@@ -338,7 +347,6 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
     added,
     pool,
     osm,
-    adding,
     err,
     lastSaved,
     setManualArrived,

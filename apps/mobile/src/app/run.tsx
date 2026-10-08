@@ -310,10 +310,11 @@ export default function RunScreen() {
               lon: addLocation.lon,
               tags: { amenity: "drinking_water" },
             }}
+            // The sheet, and what was typed into it, stays until the point
+            // exists: a failed add shows its reason there for another try.
             onAction={async (_action, extras) => {
-              const loc = addLocation;
+              await s.addAt(addLocation, extras);
               setAddLocation(null);
-              await s.addAt(loc, extras);
             }}
           />
         ) : null}
