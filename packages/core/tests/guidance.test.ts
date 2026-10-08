@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { runGuidance, ARRIVAL_RADIUS_M } from "../src/guidance";
+import { runGuidance, guidanceWindow, ARRIVAL_RADIUS_M } from "../src/guidance";
 import type { Turn } from "../src/brouter";
 
 const turn = (distM: number, angle = 45): Turn => ({ lat: 0, lon: 0, distM, angle });
@@ -34,5 +34,101 @@ describe("runGuidance", () => {
     expect(g.traveledM).toBe(0);
     expect(g.nextTurn?.distM).toBe(60);
     expect(g.distToTurn).toBe(60);
+  });
+});
+
+describe("runGuidance on a retraced street", () => {
+  // Module's flat-earth scale at the equator: meters per 0.001° of longitude/latitude.
+  const M = 111.32;
+  // Start → east along a street → up a dead-end spur to fountain A → back down
+  // the same spur → on east → north to fountain B. [lon, lat].
+  const route: [number, number][] = [
+    [0, 0],
+    [0.002, 0], // spur entrance
+    [0.002, 0.003], // A, at the spur's tip
+    [0.002, 0], // spur exit
+    [0.005, 0],
+    [0.005, 0.002], // B
+  ];
+  const A = { lat: 0.003, lon: 0.002 };
+  const B = { lat: 0.002, lon: 0.005 };
+  const stops = [A, B];
+  const along = { A: 5 * M, spurExit: 8 * M, B: 13 * M };
+  const turns: Turn[] = [
+    { lat: 0, lon: 0.002, distM: 2 * M, angle: -90 }, // into the spur
+    { lat: 0.003, lon: 0.002, distM: along.A, angle: 180 }, // turnaround at A
+    { lat: 0, lon: 0.002, distM: along.spurExit, angle: -90 }, // out of the spur, east
+    { lat: 0, lon: 0.005, distM: 12 * M, angle: -90 }, // north to B
+  ];
+  // Halfway down the spur, walking back out of it toward B.
+  const onSpur = { lat: 0.0015, lon: 0.002 };
+
+  it("without a window reads the way back as the way in (the bug)", () => {
+    const g = runGuidance(onSpur, B, route, turns);
+    expect(g.traveledM).toBeCloseTo(3.5 * M, 0);
+    expect(g.nextTurn?.angle).toBe(180);
+  });
+
+  it("with the target's window places the runner on the way back", () => {
+    const g = runGuidance(onSpur, B, route, turns, guidanceWindow(route, stops, 1));
+    expect(g.traveledM).toBeCloseTo(6.5 * M, 0);
+    expect(g.traveledM).toBeGreaterThan(along.A);
+    expect(g.nextTurn?.distM).toBe(along.spurExit);
+    expect(g.distToTurn).toBeCloseTo(1.5 * M, 0);
+  });
+
+  it("still reads the way in as the way in while A is the target", () => {
+    const g = runGuidance(onSpur, A, route, turns, guidanceWindow(route, stops, 0));
+    expect(g.traveledM).toBeCloseTo(3.5 * M, 0);
+    expect(g.nextTurn?.distM).toBe(along.A);
+  });
+
+  it("re-acquires globally after an off-route jump", () => {
+    // Back near the start with B still the target (e.g. A was skipped from afar):
+    // nothing in B's window is within reach, so the whole route is searched.
+    const nearStart = { lat: 0.0001, lon: 0.0005 };
+    const g = runGuidance(nearStart, B, route, turns, guidanceWindow(route, stops, 1));
+    expect(g.traveledM).toBeCloseTo(0.5 * M, 0);
+    expect(g.nextTurn?.distM).toBe(2 * M);
+  });
+});
+
+describe("guidanceWindow", () => {
+  const route: [number, number][] = [
+    [0, 0],
+    [0.003, 0],
+    [0, 0],
+  ];
+  const A = { lat: 0, lon: 0.003 };
+  const atA = 0.003 * 111320;
+
+  it("spans from the start to just past the first target", () => {
+    expect(guidanceWindow(route, [A], 0)).toEqual([-Infinity, atA + ARRIVAL_RADIUS_M]);
+  });
+
+  it("runs from the last stop to the end once every stop is done", () => {
+    // The way home of a single-pin out-and-back loop.
+    const w = guidanceWindow(route, [A], 1);
+    expect(w).toEqual([atA - ARRIVAL_RADIUS_M, Infinity]);
+    const g = runGuidance({ lat: 0, lon: 0.001 }, null, route, [], w);
+    expect(g.traveledM).toBeCloseTo(atA + 0.002 * 111320, 0);
+  });
+
+  it("is undefined without a route or stops", () => {
+    expect(guidanceWindow([], [A], 0)).toBeUndefined();
+    expect(guidanceWindow(route, [], 0)).toBeUndefined();
+  });
+
+  it("serves the same window for an equal stop list and re-projects moved stops", () => {
+    const fresh: [number, number][] = route.map(([lon, lat]) => [lon, lat]);
+    const first = guidanceWindow(fresh, [A], 0);
+    // A status change hands over a new stops array with the same points.
+    const again = guidanceWindow(fresh, [{ ...A }], 0);
+    expect(again).toEqual(first);
+    // A moved stop is re-projected.
+    expect(guidanceWindow(fresh, [{ lat: 0, lon: 0.002 }], 0)?.[1]).toBeCloseTo(
+      0.002 * 111320 + ARRIVAL_RADIUS_M,
+      6,
+    );
   });
 });

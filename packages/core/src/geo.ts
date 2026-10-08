@@ -127,12 +127,16 @@ export function fmtDist(m: number): string {
   return `${metersToMiles(m).toFixed(2)} mi`;
 }
 
-// How far along a [lon,lat] polyline the point nearest `p` sits, in meters from
-// the path start. Projects `p` onto each segment (flat-earth — fine at street
-// scale) and returns the cumulative distance to the closest projection. Used to
-// turn a live GPS fix into "meters traveled" for picking the next turn.
-export function nearestCumDistOnPath(coords: [number, number][], p: Pt): number {
-  if (coords.length < 2) return 0;
+// Where `p` projects onto a [lon,lat] polyline: meters along the path from its
+// start, and meters off it. Projects onto each segment (flat-earth — fine at
+// street scale) and keeps the first closest projection. With a [minM, maxM]
+// window only that stretch of the path is considered, clamped to its ends.
+function projectOnPath(
+  coords: [number, number][],
+  p: Pt,
+  minM = -Infinity,
+  maxM = Infinity,
+): { alongM: number; offM: number } {
   // Local equirectangular meters/degree at this latitude.
   const mPerLat = 111320;
   const mPerLon = 111320 * Math.cos(toRad(p.lat));
@@ -142,8 +146,8 @@ export function nearestCumDistOnPath(coords: [number, number][], p: Pt): number 
   const py = y(p.lat);
   let cum = 0;
   let best = Infinity;
-  let bestDist = 0;
-  for (let i = 0; i < coords.length - 1; i++) {
+  let bestAlong = 0;
+  for (let i = 0; i < coords.length - 1 && cum <= maxM; i++) {
     const ax = x(coords[i][0]);
     const ay = y(coords[i][1]);
     const bx = x(coords[i + 1][0]);
@@ -151,18 +155,59 @@ export function nearestCumDistOnPath(coords: [number, number][], p: Pt): number 
     const dx = bx - ax;
     const dy = by - ay;
     const segLen = Math.hypot(dx, dy);
-    let t = segLen > 0 ? ((px - ax) * dx + (py - ay) * dy) / (segLen * segLen) : 0;
-    t = Math.max(0, Math.min(1, t));
-    const cx = ax + t * dx;
-    const cy = ay + t * dy;
-    const d = Math.hypot(px - cx, py - cy);
-    if (d < best) {
-      best = d;
-      bestDist = cum + t * segLen;
+    if (cum + segLen >= minM) {
+      let t = segLen > 0 ? ((px - ax) * dx + (py - ay) * dy) / (segLen * segLen) : 0;
+      const lo = segLen > 0 ? Math.max(0, (minM - cum) / segLen) : 0;
+      const hi = segLen > 0 ? Math.min(1, (maxM - cum) / segLen) : 0;
+      t = Math.max(lo, Math.min(hi, t));
+      const d = Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+      if (d < best) {
+        best = d;
+        bestAlong = cum + t * segLen;
+      }
     }
     cum += segLen;
   }
-  return bestDist;
+  return { alongM: bestAlong, offM: best };
+}
+
+// A fix farther than this from the whole windowed stretch is off the route (a
+// detour, or a stop skipped from afar), so the window no longer says where the
+// runner is and the whole route is searched instead.
+const WINDOW_OFF_ROUTE_M = 60;
+
+// How far along a [lon,lat] polyline the point nearest `p` sits, in meters from
+// the path start. Used to turn a live GPS fix into "meters traveled" for picking
+// the next turn.
+//
+// Where the route retraces a street (out-and-back, a dead-end spur to a
+// fountain) both passes are equally near and the first one wins, so a runner on
+// the way back reads as still on the way out. `window` ([minM, maxM] along the
+// path) limits the search to the stretch the runner should be on; see
+// guidanceWindow in ./guidance.
+export function nearestCumDistOnPath(
+  coords: [number, number][],
+  p: Pt,
+  window?: [minM: number, maxM: number],
+): number {
+  if (coords.length < 2) return 0;
+  if (window) {
+    const near = projectOnPath(coords, p, window[0], window[1]);
+    if (near.offM <= WINDOW_OFF_ROUTE_M) return near.alongM;
+  }
+  return projectOnPath(coords, p).alongM;
+}
+
+// Meters along a [lon,lat] polyline at which each stop is visited, in visit
+// order. Stop k is searched for only from stop k−1's position onward: a route
+// can pass a stop's spot more than once (it's on the way to an earlier stop, or
+// the loop comes back along the same street), and only the pass after the
+// previous stop is the visit. BRouter snaps each waypoint to the nearest way,
+// so the visit is also the closest pass from there on.
+export function stopsAlongPath(coords: [number, number][], stops: readonly Pt[]): number[] {
+  if (coords.length < 2) return stops.map(() => 0);
+  let from = 0;
+  return stops.map((s) => (from = projectOnPath(coords, s, from).alongM));
 }
 
 // Human turn instruction for a signed turn angle (deg, + = right, − = left).
@@ -174,6 +219,13 @@ export function maneuver(angle: number): string {
   if (a < 135) return `Turn ${side}`;
   if (a < 160) return `Sharp ${side}`;
   return "U-turn";
+}
+
+// The side a signed turn angle turns to, for copy too tight for maneuver()
+// (the lock-screen "Left in 300 ft"). Turns are only extracted past 35°, so
+// there is no "straight" case; a U-turn keeps its sign.
+export function turnSide(angle: number): "left" | "right" {
+  return angle < 0 ? "left" : "right";
 }
 
 // Total length (meters) of an ordered path, optionally closed back to start.
@@ -192,19 +244,21 @@ export function pathLength(pts: Pt[], loop: boolean): number {
 export function pointAtDistOnPath(coords: [number, number][], distM: number): [number, number] {
   if (coords.length === 0) return [0, 0];
   if (coords.length === 1 || distM <= 0) return coords[0];
-  const walk = (i: number, remaining: number): [number, number] => {
-    if (i >= coords.length - 1) return coords[coords.length - 1];
+  // A loop, not recursion: a long route has tens of thousands of vertices, more
+  // stack frames than Hermes allows.
+  let remaining = distM;
+  for (let i = 0; i < coords.length - 1; i++) {
     const a = coords[i];
     const b = coords[i + 1];
     const segLen = haversine({ lat: a[1], lon: a[0] }, { lat: b[1], lon: b[0] });
-    if (segLen === 0) return walk(i + 1, remaining);
+    if (segLen === 0) continue;
     if (remaining <= segLen) {
       const t = remaining / segLen;
       return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
     }
-    return walk(i + 1, remaining - segLen);
-  };
-  return walk(0, distM);
+    remaining -= segLen;
+  }
+  return coords[coords.length - 1];
 }
 
 // Forward heading (deg, 0 = north, clockwise) of the route at the point nearest

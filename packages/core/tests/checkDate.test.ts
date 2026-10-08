@@ -28,6 +28,15 @@ describe("parseCheckDate", () => {
     expect(parseCheckDate("yes")).toBeNull();
     expect(parseCheckDate("15/03/2024")).toBeNull();
   });
+
+  it("rejects out-of-range months and days instead of rolling them over", () => {
+    expect(parseCheckDate("2024-13-45")).toBeNull();
+    expect(parseCheckDate("2024-00")).toBeNull();
+    expect(parseCheckDate("2024-04-31")).toBeNull();
+    expect(parseCheckDate("2023-02-29")).toBeNull();
+    expect(parseCheckDate("2024-02-29")).toBe(Date.UTC(2024, 1, 29));
+    expect(parseCheckDate("2024-12-31")).toBe(Date.UTC(2024, 11, 31));
+  });
 });
 
 describe("lastCheckedMs", () => {
@@ -42,16 +51,29 @@ describe("lastCheckedMs", () => {
     }
   });
 
-  it("prefers check_date over the other keys", () => {
-    const ms = lastCheckedMs({
-      "survey:date": "2020-01-01",
-      check_date: "2024-01-01",
-    });
-    expect(ms).toBe(Date.UTC(2024, 0, 1));
+  it("takes the most recent date across the keys", () => {
+    expect(lastCheckedMs({ "survey:date": "2020-01-01", check_date: "2024-01-01" })).toBe(
+      Date.UTC(2024, 0, 1),
+    );
+    // An older check_date must not hide a newer survey:date.
+    expect(lastCheckedMs({ check_date: "2019-01-01", "survey:date": "2025-05-01" })).toBe(
+      Date.UTC(2025, 4, 1),
+    );
+    expect(lastCheckedMs({ check_date: "2021", checked: "2023-07" })).toBe(Date.UTC(2023, 6, 1));
+  });
+
+  it("skips a garbage value and uses the next valid key", () => {
+    expect(lastCheckedMs({ check_date: "June 2024", "survey:date": "2024-05-01" })).toBe(
+      Date.UTC(2024, 4, 1),
+    );
+    expect(lastCheckedMs({ check_date: "2024-13-45", checked: "2022-01-01" })).toBe(
+      Date.UTC(2022, 0, 1),
+    );
   });
 
   it("returns null when the tag value is garbage", () => {
     expect(lastCheckedMs({ check_date: "unknown" })).toBeNull();
+    expect(lastCheckedMs({ check_date: "2024-13-45" })).toBeNull();
   });
 });
 

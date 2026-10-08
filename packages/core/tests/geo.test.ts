@@ -14,8 +14,10 @@ import {
   pathLength,
   pointAtDistOnPath,
   routeHeadingAt,
+  stopsAlongPath,
   toDeg,
   toRad,
+  turnSide,
   type Pt,
 } from "../src/geo";
 
@@ -206,6 +208,19 @@ describe("maneuver", () => {
   });
 });
 
+describe("turnSide", () => {
+  it.each([
+    [-90, "left"],
+    [90, "right"],
+    [-35, "left"],
+    [35, "right"],
+    [-180, "left"],
+    [180, "right"],
+  ])("maps %d° to %s", (angle, side) => {
+    expect(turnSide(angle)).toBe(side);
+  });
+});
+
 describe("pathLength", () => {
   const a = { lat: 0, lon: 0 };
   const b = { lat: 0, lon: 0.001 };
@@ -269,6 +284,71 @@ describe("nearestCumDistOnPath", () => {
     const d = nearestCumDistOnPath(withDup, { lat: 0, lon: 0.0015 });
     expect(d).toBeCloseTo(0.0015 * M_PER_LON, 0);
   });
+
+  describe("with a window", () => {
+    // Out-and-back along the equator: east 0.003° (≈334 m), then straight back.
+    const outAndBack: [number, number][] = [
+      [0, 0],
+      [0.003, 0],
+      [0, 0],
+    ];
+    const turnaround = 0.003 * M_PER_LON;
+    const onTheWayBack = { lat: 0, lon: 0.001 };
+
+    it("snaps a retraced street to the first pass without one", () => {
+      expect(nearestCumDistOnPath(outAndBack, onTheWayBack)).toBeCloseTo(0.001 * M_PER_LON, 0);
+    });
+
+    it("searches only the windowed stretch, clamped to its ends", () => {
+      const d = nearestCumDistOnPath(outAndBack, onTheWayBack, [turnaround - 30, Infinity]);
+      expect(d).toBeCloseTo(turnaround + 0.002 * M_PER_LON, 0);
+    });
+
+    it("falls back to the whole route when the fix is far off the window", () => {
+      // The window hugs the turnaround, ~190 m from the fix: it is off route
+      // as far as the window knows, so the whole route is searched.
+      const d = nearestCumDistOnPath(outAndBack, onTheWayBack, [turnaround - 30, turnaround + 30]);
+      expect(d).toBeCloseTo(0.001 * M_PER_LON, 0);
+    });
+
+    it("keeps a nearby fix inside the window", () => {
+      // The fix projects 40 m past the window's end, which is still on route.
+      const end = 0.001 * M_PER_LON - 40;
+      expect(nearestCumDistOnPath(outAndBack, onTheWayBack, [0, end])).toBeCloseTo(end, 6);
+    });
+  });
+});
+
+describe("stopsAlongPath", () => {
+  const M_PER_LON = 111320;
+  // East to a turnaround, back west past the start's meridian, then on to the west.
+  const path: [number, number][] = [
+    [0, 0],
+    [0.003, 0],
+    [-0.002, 0],
+  ];
+
+  it("places each stop on the pass after the previous stop", () => {
+    // B sits on the street the route took on the way out to A, but it's visited
+    // on the way back: after A, at 0.003 + 0.002 = 0.005° along.
+    const A = { lat: 0, lon: 0.003 };
+    const B = { lat: 0, lon: 0.001 };
+    const [a, b] = stopsAlongPath(path, [A, B]);
+    expect(a).toBeCloseTo(0.003 * M_PER_LON, 0);
+    expect(b).toBeCloseTo(0.005 * M_PER_LON, 0);
+    // A plain nearest-point search puts B on the way out.
+    expect(nearestCumDistOnPath(path, B)).toBeCloseTo(0.001 * M_PER_LON, 0);
+  });
+
+  it("keeps twins at the same position", () => {
+    const A = { lat: 0, lon: 0.002 };
+    const [a, twin] = stopsAlongPath(path, [A, { ...A }]);
+    expect(twin).toBe(a);
+  });
+
+  it("is all zeros on a degenerate path", () => {
+    expect(stopsAlongPath([[0, 0]], [{ lat: 0, lon: 0 }])).toEqual([0]);
+  });
 });
 
 describe("pointAtDistOnPath", () => {
@@ -309,6 +389,14 @@ describe("pointAtDistOnPath", () => {
       haversine({ lat: 0, lon: 0 }, { lat: 0, lon: 0.0005 }),
     );
     expect(lon).toBeCloseTo(0.0005, 6);
+  });
+
+  it("walks a 20,000-vertex route without exhausting the stack", () => {
+    // ~1.1 m steps due east: long runs have this many vertices.
+    const long: [number, number][] = Array.from({ length: 20_000 }, (_, i) => [i * 1e-5, 0]);
+    expect(pointAtDistOnPath(long, 1e9)).toEqual(long[19_999]);
+    const nearEnd = pointAtDistOnPath(long, haversine({ lat: 0, lon: 0 }, { lat: 0, lon: 0.19 }));
+    expect(nearEnd[0]).toBeCloseTo(0.19, 6);
   });
 });
 

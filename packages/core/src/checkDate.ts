@@ -11,14 +11,31 @@ export function parseCheckDate(raw?: string): number | null {
   if (!raw) return null;
   const m = /^(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?/.exec(raw.trim());
   if (!m) return null;
-  const t = Date.UTC(Number(m[1]), m[2] ? Number(m[2]) - 1 : 0, m[3] ? Number(m[3]) : 1);
-  return Number.isNaN(t) ? null : t;
+  const year = Number(m[1]);
+  const month = m[2] ? Number(m[2]) : 1;
+  const day = m[3] ? Number(m[3]) : 1;
+  const t = Date.UTC(year, month - 1, day);
+  // Date.UTC silently rolls an out-of-range month or day forward (2024-13-45
+  // becomes 2025-02-14), which would turn a typo into a later, plausible check.
+  // A real date reads back unchanged.
+  const d = new Date(t);
+  if (d.getUTCFullYear() !== year || d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) {
+    return null;
+  }
+  return t;
 }
 
 // Epoch ms of a point's most recent ground verification, or null if never recorded.
+// Surveyors use different keys, so a node can carry an old check_date next to a
+// newer survey:date, or a value that isn't a date at all: take the latest one
+// that parses.
 export function lastCheckedMs(tags: Record<string, string>): number | null {
-  const raw = CHECK_DATE_KEYS.map((k) => tags[k]).find((v) => v != null);
-  return parseCheckDate(raw);
+  let latest: number | null = null;
+  for (const key of CHECK_DATE_KEYS) {
+    const t = parseCheckDate(tags[key]);
+    if (t !== null && (latest === null || t > latest)) latest = t;
+  }
+  return latest;
 }
 
 // How `checkedAgoLabel` writes its units: "short" is the compact form for a
