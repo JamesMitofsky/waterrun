@@ -10,6 +10,7 @@
     "lint": "eslint",
     "map:placeholders": "tsx scripts/build-map-placeholders.ts",
     "header:assets": "tsx scripts/build-header-assets.ts",
+    "brand:icons": "tsx scripts/build-brand-icons.ts",
     "og:preview": "tsx scripts/preview-og-card.ts",
     "typecheck": "astro check",
     "test": "vitest run"

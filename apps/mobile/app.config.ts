@@ -10,6 +10,8 @@ const config: ExpoConfig = {
   version: "1.0.0",
   scheme: cfg.scheme, // registers waterrun:// for the OSM OAuth deep-link callback
   orientation: "portrait",
+  // icon.png and splash-icon.png are generated with the site's favicons from one
+  // master: `pnpm --filter @water-run/site brand:icons`. Don't edit them by hand.
   icon: "./assets/icon.png",
   userInterfaceStyle: "light",
   ios: {
@@ -56,6 +58,8 @@ const config: ExpoConfig = {
     [
       "expo-splash-screen",
       {
+        // The icon's own tile colour, so launch reads as the icon opening up.
+        backgroundColor: cfg.iconBackground,
         image: "./assets/splash-icon.png",
         imageWidth: 180,
       },
