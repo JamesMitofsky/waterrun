@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { Redirect, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -79,9 +79,16 @@ export default function RunScreen() {
     [s.stops],
   );
 
+  // Set synchronously, so Finish runs once. The button stays until the replace
+  // lands, and a second tap would freeze the screen on the reset run and queue
+  // a replace to the planner behind the one to the summary.
+  const finished = useRef(false);
+
   // Finishing never waits on the network: the run ends on the device and the
   // summary opens at once; the changeset closes in the background.
   const handleFinish = () => {
+    if (finished.current) return;
+    finished.current = true;
     setEnded(live);
     const routeId = endRun();
     if (routeId) router.replace({ pathname: "/run-detail", params: { id: routeId, fresh: "1" } });
