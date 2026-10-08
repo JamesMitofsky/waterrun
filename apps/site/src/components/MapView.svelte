@@ -344,6 +344,11 @@
     // Fired on a fatal (pre-load) map failure so callers can stop their own
     // loaders and let the error surface.
     onError?: (err: unknown) => void;
+    // Fired when the map has really loaded (MapLibre's `load`) over a usable
+    // basemap — never for a fatal failure, whose `load` fires over a blank map.
+    // View reports are no substitute: a resize or an opening jump reports a
+    // view before the map has loaded anything.
+    onLoad?: () => void;
     // Fired once, when the map tells its loading frame to clear — the same
     // moment as the `rosm:map-ready` event, for the caller that rendered this
     // map and wants to start something the visitor will actually see. Fires
@@ -382,6 +387,7 @@
     class: className,
     hidePlaceLabels = false,
     onError,
+    onLoad,
     onReady,
     markerPopup,
   }: Props = $props();
@@ -1143,6 +1149,7 @@
     // The controls exist now; the visible area is measured before they do.
     measureVisible?.();
     emitView(false);
+    if (failure !== "fatal") onLoad?.();
     const attrEl = map?.getContainer().querySelector(".maplibregl-ctrl-attrib");
     attrEl?.classList.remove("maplibregl-compact-show");
     if (hidePlaceLabels && map) {
@@ -1163,9 +1170,12 @@
     if (!map || !interactive) return;
     const mapInst = map;
     // The tap, grown to a fingertip's reach (mapTap.ts); of the dots it
-    // catches, the one nearest where it landed.
+    // catches, the one nearest where it landed. Not while a draft is open in
+    // the card (`held`): a tap near a dot is then most likely meant to put the
+    // keyboard away, and switching the selection would throw the draft out, so
+    // only a tap right on a dot counts.
     const { x, y } = ev.point;
-    const slop = tapSlopPx(markerRadius + MARKER_STROKE_PX);
+    const slop = held ? 0 : tapSlopPx(markerRadius + MARKER_STROKE_PX);
     const feats = mapInst.queryRenderedFeatures(
       [
         [x - slop, y - slop],

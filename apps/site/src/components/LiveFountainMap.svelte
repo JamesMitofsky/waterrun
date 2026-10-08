@@ -55,8 +55,8 @@
   // all — a map that only timed out loads late, and its fountains with it.
   let mapFailed = $state(false);
 
-  // Settles the first time the map reports a view, which MapView does on
-  // `load` — however late that is.
+  // Settles when MapView reports a real load over a usable basemap, however
+  // late that is (a background tab only loads once it is shown).
   let markMapLoaded!: () => void;
   const mapLoaded = new Promise<void>((resolve) => (markMapLoaded = resolve));
 
@@ -88,7 +88,7 @@
   // back first.
   load();
 
-  function onViewChange() {
+  function onMapLoad() {
     mapFailed = false;
     markMapLoaded();
   }
@@ -149,7 +149,7 @@
     interactive
     showLocate
     showFullscreen
-    {onViewChange}
+    onLoad={onMapLoad}
     onError={onMapError}
     {markers}
     markerRadius={6}
