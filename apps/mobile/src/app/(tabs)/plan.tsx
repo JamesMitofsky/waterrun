@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Text, View } from "react-native";
 import { useIsFocused, useRouter } from "expo-router";
 import { PointSheetHost } from "../../components/ui/PointSheetHost";
-import { usePlanner, inRouteIdsOf } from "@rosm/core/stores/planner";
+import { usePlanner, inRouteIdsOf, shouldAutoFindPoints } from "@rosm/core/stores/planner";
 import { fmtDist } from "@rosm/core/geo";
 import type { Fountain } from "@rosm/core/schemas";
 import { Button } from "../../components/ui/Button";
@@ -45,8 +45,7 @@ function PlanContent() {
   // The map only draws the device's location while this tab is on screen.
   const isFocused = useIsFocused();
 
-  // Narrow slices only — the map re-diffs its native sources on prop changes,
-  // so busy/err churn in the panels must not reach it.
+  // Narrow slices only, so unrelated planner churn doesn't re-render the map.
   const phase = usePlanner((s) => s.phase);
   const center = usePlanner((s) => s.center);
   const recenterKey = usePlanner((s) => s.recenterKey);
@@ -59,7 +58,9 @@ function PlanContent() {
   const excludedIds = usePlanner((s) => s.excludedIds);
   const distanceM = usePlanner((s) => s.distanceM);
   const resumable = usePlanner((s) => s.resumable);
+  const draftReady = usePlanner((s) => s.draftReady);
   const busy = usePlanner((s) => s.busy);
+  const err = usePlanner((s) => s.err);
 
   usePlannerDraftSync();
   const { edits, updatePoint } = useOsmEdits({ tagKey: tag.key });
@@ -96,30 +97,29 @@ function PlanContent() {
     })();
   }, []);
 
-  // Whenever center becomes available in map phase with no fountains loaded yet, query points.
+  // Search for points once there is a start and nothing loaded, but not while
+  // a saved route is on offer: the search would wipe the stops the user may be
+  // about to restore. Turning the offer down lets it run.
   useEffect(() => {
-    if (
-      center &&
-      phase === "map" &&
-      fountains.length === 0 &&
-      busy === null &&
-      !usePlanner.getState().err
-    ) {
+    const fountainsCount = fountains.length;
+    if (shouldAutoFindPoints({ center, phase, fountainsCount, busy, err, draftReady, resumable })) {
       usePlanner.getState().findPoints();
     }
-  }, [center, phase, fountains.length, busy]);
+  }, [center, phase, fountains.length, busy, err, draftReady, resumable]);
 
-  // A saved route from a prior session — offer to resume it, natively.
+  // A saved route from a prior session — offer to resume it, natively. The
+  // choice restores the draft the offer showed, whatever happened meanwhile.
   useEffect(() => {
     if (!resumable) return;
-    Alert.alert(
-      "Resume your route?",
-      `${resumable.stops.length} stops · ${fmtDist(resumable.distanceM)}`,
-      [
-        { text: "Start fresh", onPress: () => usePlanner.getState().dismissDraft() },
-        { text: "Resume", isPreferred: true, onPress: () => usePlanner.getState().resumeDraft() },
-      ],
-    );
+    const draft = resumable;
+    Alert.alert("Resume your route?", `${draft.stops.length} stops · ${fmtDist(draft.distanceM)}`, [
+      { text: "Start fresh", onPress: () => usePlanner.getState().dismissDraft() },
+      {
+        text: "Resume",
+        isPreferred: true,
+        onPress: () => usePlanner.getState().resumeDraft(draft),
+      },
+    ]);
   }, [resumable]);
 
   // Config step 0: tap sets the start. Map phase: tap drops a via waypoint.
