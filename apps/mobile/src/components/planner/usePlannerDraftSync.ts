@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { AppState } from "react-native";
 import { useShallow } from "zustand/react/shallow";
 import { usePlanner, type Draft } from "@rosm/core/stores/planner";
+import { draftSaveAction } from "@rosm/core/draftSave";
 import { api } from "../../ports/api";
 
 // How long the route has to sit still before it is saved. One tap changes it
@@ -14,9 +15,10 @@ const SAVE_DELAY_MS = 500;
 // change so a force-quit can offer to resume it. On mobile /api/draft is
 // backed by the device kv store (see ports/api.ts). Skipped until the initial
 // load runs, while a resume offer is pending, and before any route exists —
-// identical gating to the web hook. Saves are coalesced (SAVE_DELAY_MS), and
-// one still waiting goes out at once when the app leaves the foreground, the
-// last moment before a kill.
+// identical gating to the web hook. A stale route isn't saved either, since a
+// resume would take it as current (see draftSaveAction). Saves are coalesced
+// (SAVE_DELAY_MS), and one still waiting goes out at once when the app leaves
+// the foreground, the last moment before a kill.
 export function usePlannerDraftSync() {
   // Mount: look for a saved route from a prior session.
   useEffect(() => {
@@ -29,6 +31,7 @@ export function usePlannerDraftSync() {
     useShallow((s) => ({
       draftReady: s.draftReady,
       resumable: s.resumable,
+      routeStale: s.routeStale,
       center: s.center,
       tag: s.tag,
       radiusMi: s.radiusMi,
@@ -55,31 +58,36 @@ export function usePlannerDraftSync() {
   const pending = useRef<Draft | null>(null);
 
   useEffect(() => {
-    if (!slice.draftReady || slice.resumable || slice.stops.length === 0) {
+    const action = draftSaveAction(slice);
+    if (action === "drop") {
       // Nothing to save now, and a draft still waiting is no longer the route.
       pending.current = null;
       return;
     }
-    pending.current = {
-      center: slice.center!,
-      tag: slice.tag,
-      radiusMi: slice.radiusMi,
-      recencyMode: slice.recencyMode,
-      recencyMonths: slice.recencyMonths,
-      targetMi: slice.targetMi,
-      loop: slice.loop,
-      fountains: slice.fountains,
-      pinnedIds: slice.pinnedIds,
-      excludedIds: slice.excludedIds,
-      vias: slice.vias,
-      stops: slice.stops,
-      order: slice.order,
-      reversed: slice.reversed,
-      line: slice.line,
-      distanceM: slice.distanceM,
-      turns: slice.turns,
-      autoCount: slice.autoCount,
-    };
+    // A stale route's stops and line predate its picks, so it isn't saved; a
+    // draft still waiting is the last route that planned, and still goes out.
+    if (action === "save") {
+      pending.current = {
+        center: slice.center!,
+        tag: slice.tag,
+        radiusMi: slice.radiusMi,
+        recencyMode: slice.recencyMode,
+        recencyMonths: slice.recencyMonths,
+        targetMi: slice.targetMi,
+        loop: slice.loop,
+        fountains: slice.fountains,
+        pinnedIds: slice.pinnedIds,
+        excludedIds: slice.excludedIds,
+        vias: slice.vias,
+        stops: slice.stops,
+        order: slice.order,
+        reversed: slice.reversed,
+        line: slice.line,
+        distanceM: slice.distanceM,
+        turns: slice.turns,
+        autoCount: slice.autoCount,
+      };
+    }
     const t = setTimeout(() => savePending(pending), SAVE_DELAY_MS);
     return () => clearTimeout(t);
   }, [slice]);
