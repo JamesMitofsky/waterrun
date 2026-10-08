@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  activeRunToResume,
   archiveRun,
   beginRun,
   closeChangesetWhenSettled,
   endRun,
+  forgetStaleActiveRun,
   getActiveRunId,
   trackingAction,
 } from "../src/runLifecycle";
@@ -12,6 +14,8 @@ import { useRun, type RunPlan, type RunStop } from "../src/stores/run";
 import { usePlanner } from "../src/stores/planner";
 import { useOutbox, UNDO_WINDOW_MS, type OutboxItem } from "../src/stores/outbox";
 import { configureTestPorts } from "./helpers/ports";
+
+const ACTIVE_RUN_KEY = "rosm:active-run";
 
 let ports: ReturnType<typeof configureTestPorts>;
 
@@ -67,13 +71,83 @@ afterEach(async () => {
 });
 
 describe("beginRun", () => {
-  it("marks the run on screen active", () => {
+  it("marks the run on screen active and archives it from the start", () => {
     const routeId = startRun();
     expect(getActiveRunId()).toBe(routeId);
+    expect(getArchivedRouteIndex().map((r) => r.routeId)).toEqual([routeId]);
+    expect(getArchivedRoute(routeId)?.plan.index).toBe(0);
+  });
+
+  it("doesn't rewrite the archive of a run already under way", () => {
+    const routeId = startRun();
+    useRun.getState().setIndex(2);
+    archiveRun();
+    beginRun();
+    expect(getArchivedRoute(routeId)?.plan.index).toBe(2);
   });
 
   it("does nothing without a run", () => {
     beginRun();
+    expect(getActiveRunId()).toBeNull();
+    expect(getArchivedRouteIndex()).toEqual([]);
+  });
+});
+
+describe("activeRunToResume", () => {
+  it("picks the active run back up under its own routeId, so its archive is updated in place", () => {
+    const routeId = startRun();
+    useRun.getState().setStatus(1, "confirm");
+    archiveRun(1);
+    useRun.getState().reset(); // the process died
+
+    const saved = activeRunToResume();
+    expect(saved?.routeId).toBe(routeId);
+    useRun.getState().hydrate(saved!);
+    expect(useRun.getState().index).toBe(1);
+    expect(useRun.getState().stops[0].status).toBe("confirm");
+
+    archiveRun(2);
+    expect(getArchivedRouteIndex().map((r) => r.routeId)).toEqual([routeId]);
+    expect(getArchivedRoute(routeId)?.plan.index).toBe(2);
+  });
+
+  it("finds the active run by id, not the newest archive", () => {
+    const first = startRun();
+    useRun.getState().reset();
+    useRun.getState().setPlan(plan);
+    archiveRun(); // a newer run, archived but never made active
+    ports.kv.set(ACTIVE_RUN_KEY, first);
+    expect(activeRunToResume()?.routeId).toBe(first);
+  });
+
+  it("ignores a run that reached its last stop", () => {
+    startRun();
+    archiveRun(plan.stops.length);
+    expect(activeRunToResume()).toBeNull();
+  });
+
+  it("is null with no active run, or with its archive gone", () => {
+    expect(activeRunToResume()).toBeNull();
+    ports.kv.set(ACTIVE_RUN_KEY, "missing");
+    expect(activeRunToResume()).toBeNull();
+  });
+});
+
+describe("forgetStaleActiveRun", () => {
+  it("keeps a run that can still be resumed", () => {
+    const routeId = startRun();
+    forgetStaleActiveRun();
+    expect(getActiveRunId()).toBe(routeId);
+  });
+
+  it("forgets a finished or missing run", () => {
+    startRun();
+    archiveRun(plan.stops.length);
+    forgetStaleActiveRun();
+    expect(getActiveRunId()).toBeNull();
+
+    ports.kv.set(ACTIVE_RUN_KEY, "missing");
+    forgetStaleActiveRun();
     expect(getActiveRunId()).toBeNull();
   });
 });

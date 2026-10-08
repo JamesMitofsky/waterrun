@@ -5,15 +5,15 @@
 import type { KvPort } from "./ports";
 import { corePorts } from "./configure";
 import { callApi, postJson } from "./apiCall";
-import { archiveRoute } from "./routeArchive";
-import { useRun } from "./stores/run";
+import { archiveRoute, getArchivedRoute, getArchivedRouteIndex } from "./routeArchive";
+import { useRun, type SavedRun } from "./stores/run";
 import { usePlanner } from "./stores/planner";
 import { useOutbox } from "./stores/outbox";
 
 // The routeId of the run the user started and hasn't ended. Kept in the kv
 // store so it outlives the process: location tracking runs only for an active
 // run, so tracking the OS restores after the app died mid-run can tell it has
-// nobody to track for.
+// nobody to track for, and a relaunch can find that run again.
 const ACTIVE_RUN_KEY = "rosm:active-run";
 
 // How long an ended run waits for the outbox to settle before giving up on
@@ -75,11 +75,30 @@ export function archiveRun(index = useRun.getState().index): void {
   });
 }
 
-// The run on screen is under way: mark it active.
+// The run on screen is under way: mark it active, and archive it from its
+// first moment, so a run cut short before any tap can still be found by its id.
 export function beginRun(): void {
   const { hasPlan, routeId } = useRun.getState();
   if (!hasPlan || !routeId) return;
   if (getActiveRunId() !== routeId) setActiveRunId(routeId);
+  if (!getArchivedRouteIndex().some((r) => r.routeId === routeId)) archiveRun();
+}
+
+// The active run as archived, ready for useRun.hydrate under its own routeId,
+// or null when there's nothing to pick up: no active run, an archive entry
+// that's missing or unreadable, or a run that already reached its last stop.
+export function activeRunToResume(): SavedRun | null {
+  const routeId = getActiveRunId();
+  const route = routeId ? getArchivedRoute(routeId) : undefined;
+  if (!route || route.plan.index >= route.plan.stops.length) return null;
+  return { ...route.plan, routeId: route.routeId };
+}
+
+// At launch: an active run that can't be resumed was left by a run that ended
+// without its teardown (the app was killed on "Run complete", or its archive
+// entry is gone). Forget it, so nothing takes that run for a live one.
+export function forgetStaleActiveRun(): void {
+  if (getActiveRunId() !== null && activeRunToResume() === null) setActiveRunId(null);
 }
 
 // What location tracking should do now. It belongs to an active run with a

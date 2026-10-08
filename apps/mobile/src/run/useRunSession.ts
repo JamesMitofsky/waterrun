@@ -10,8 +10,7 @@ import {
 import { compass, type Pt } from "@rosm/core/geo";
 import { ptLabel } from "@rosm/core/pointTypes";
 import { STATUS_COLOR } from "@rosm/core/editStatus";
-import { getArchivedRoutes } from "@rosm/core/routeArchive";
-import { archiveRun, beginRun } from "@rosm/core/runLifecycle";
+import { activeRunToResume, archiveRun, beginRun } from "@rosm/core/runLifecycle";
 import { progressLine } from "@rosm/core/runProgress";
 import type { EditAction, EditExtras, Fountain } from "@rosm/core/schemas";
 import type { SurveyAction } from "../components/PointSheet";
@@ -51,14 +50,18 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
   const [adding, setAdding] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [hydrating, setHydrating] = useState(() => enabled && !useRun.getState().hasPlan);
+  const [nothingToResume, setNothingToResume] = useState(false);
   const [lastSaved, setLastSaved] = useState<{ nodeId: number; label: string } | null>(null);
 
-  // Cold start (direct nav to /run): recover the most recent archived run.
+  // Cold start (/run reached with no run in memory, e.g. by a link): pick the
+  // active run back up by its id and under that id, so its archive entry keeps
+  // being the one updated. A finished run, or none, is nothing to resume.
   useEffect(() => {
     if (!enabled || useRun.getState().hasPlan) return;
     Promise.resolve().then(() => {
-      const latest = getArchivedRoutes()[0];
-      if (latest?.plan?.stops?.length) useRun.getState().hydrate(latest.plan);
+      const saved = activeRunToResume();
+      if (saved) useRun.getState().hydrate(saved);
+      else setNothingToResume(true);
       setHydrating(false);
     });
   }, [enabled]);
@@ -320,6 +323,7 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
     recenterKey,
     fitPoints,
     hydrating,
+    nothingToResume,
     done,
     routeId,
     stops,

@@ -1,4 +1,8 @@
-import { closeChangesetWhenSettled, endRun as endRunState } from "@rosm/core/runLifecycle";
+import {
+  closeChangesetWhenSettled,
+  endRun as endRunState,
+  forgetStaleActiveRun,
+} from "@rosm/core/runLifecycle";
 import { reconcileRunTracking } from "../tasks/runLocationTask";
 import { endRunProgress } from "../ports/notify";
 
@@ -21,9 +25,11 @@ export function endRun(): string | null {
 }
 
 // Once per launch, before any screen: undo what a run the app didn't get to
-// end left behind. Tracking the OS restored has nobody listening yet, so it
-// stops; a progress line from before is taken down.
+// end left behind. A run that can't be resumed is no longer active; tracking
+// the OS restored has nobody listening yet, so it stops; a progress line from
+// before is taken down.
 export function settleRunAtLaunch(): void {
+  forgetStaleActiveRun();
   void reconcileRunTracking();
   endRunProgress();
 }

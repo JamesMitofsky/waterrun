@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { useRouter } from "expo-router";
+import { Redirect, useRouter } from "expo-router";
 import { PointSheetHost } from "../components/ui/PointSheetHost";
 import { CheckCircleIcon } from "phosphor-react-native/src/icons/CheckCircle";
 import { SkipBackIcon } from "phosphor-react-native/src/icons/SkipBack";
@@ -116,6 +116,10 @@ export default function RunScreen() {
       },
     ];
   }, [s.markers, addLocation]);
+
+  // Reached with no run to show (a stale link, or the run already ended):
+  // back to where runs start.
+  if (s.nothingToResume) return <Redirect href="/plan" />;
 
   if (s.hydrating) {
     return (

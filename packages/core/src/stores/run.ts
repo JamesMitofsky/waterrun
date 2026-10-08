@@ -21,20 +21,23 @@ export type RunPlan = {
   turns: Turn[]; // precomputed maneuvers along the route, for the live HUD
 };
 
+// A run as the archive keeps it, ready to pick back up. Pass the routeId it was
+// archived under: without one, hydrate starts a new id and the run's next
+// archive becomes a second entry.
+export type SavedRun = Omit<RunPlan, "pool"> & {
+  pool?: Fountain[]; // optional: runs/archives persisted before pool existed
+  index?: number;
+  changesetId?: number;
+  routeId?: string;
+};
+
 type RunState = RunPlan & {
   index: number;
   changesetId?: number;
   routeId: string; // stable id for this run, used to key the localStorage archive
   hasPlan: boolean;
   setPlan: (p: RunPlan) => void;
-  hydrate: (
-    p: Omit<RunPlan, "pool"> & {
-      pool?: Fountain[]; // optional: runs/archives persisted before pool existed
-      index?: number;
-      changesetId?: number;
-      routeId?: string;
-    },
-  ) => void;
+  hydrate: (p: SavedRun) => void;
   setStatus: (id: number, status: StopStatus) => void;
   setIndex: (i: number) => void;
   setChangeset: (id: number) => void;
