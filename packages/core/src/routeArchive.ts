@@ -21,10 +21,8 @@ import { corePorts } from "./configure";
 // single blob was re-parsed and rewritten in full on every tap and grew with
 // each run.
 
-const INDEX_KEY = "run-for-maps:archive:index";
-const routeKey = (routeId: string) => `run-for-maps:archive:route:${routeId}`;
-// The original single-blob archive, migrated into the layout above on first use.
-const LEGACY_KEY = "run-for-maps:archive";
+const INDEX_KEY = "water-run:archive:index";
+const routeKey = (routeId: string) => `water-run:archive:route:${routeId}`;
 
 export type ArchivedRoute = {
   routeId: string;
@@ -148,8 +146,7 @@ function indexRoute(
 
 // Write one route, then its summary; returns the updated index. The route goes
 // first so the index never lists a run that isn't stored. A failure between the
-// two leaves the run stored but unlisted until something lists it again: the
-// run's next archive, or the migration on the next launch.
+// two leaves the run stored but unlisted until the run's next archive lists it.
 function writeRoute(
   kv: KvPort,
   r: ArchivedRoute,
@@ -160,46 +157,6 @@ function writeRoute(
   return indexRoute(kv, stored, index);
 }
 
-// Ports already checked for the legacy blob this session (one per configured
-// store, so a test's fresh store is checked again).
-const migrated = new WeakSet<KvPort>();
-
-// Move the original single-blob archive into the per-route layout, once.
-// History must survive this, so it is careful about what it overwrites and
-// when it lets go of the old blob:
-// - A route that already reads back from the new layout is never overwritten:
-//   if an earlier attempt was interrupted after writing it, the run may have
-//   moved on since. If that attempt stopped before listing it, it is listed
-//   from what was stored.
-// - The legacy key is removed only once every route it held reads back from
-//   the new keys and is in the index. An entry that can't be migrated (not a
-//   route at all) keeps the legacy key in place, so nothing is ever thrown
-//   away unread.
-function migrateLegacy(kv: KvPort) {
-  if (migrated.has(kv)) return;
-  migrated.add(kv);
-  try {
-    const legacy = parse(kv.get(LEGACY_KEY));
-    if (!Array.isArray(legacy)) return; // absent, or unreadable: leave it be
-    const routes = legacy.filter(isRoute);
-    let index = readIndex(kv);
-    // Upserts kept one entry per route in the old blob; if not, the newest wins.
-    for (const r of [...routes].sort(newestFirst)) {
-      const stored = readRoute(kv, r.routeId);
-      if (!stored) index = writeRoute(kv, r, index);
-      else if (!index.some((s) => s.routeId === r.routeId)) index = indexRoute(kv, stored, index);
-    }
-    const indexed = new Set(readIndex(kv).map((s) => s.routeId));
-    const complete =
-      routes.length === legacy.length &&
-      routes.every((r) => indexed.has(r.routeId) && readRoute(kv, r.routeId));
-    if (complete) kv.remove(LEGACY_KEY);
-  } catch {
-    // Storage full or unavailable: the legacy blob stays, and the next launch
-    // picks up where this one stopped. What did migrate is readable meanwhile.
-  }
-}
-
 // Upsert one route's current state into the archive. Called on every persist so
 // node changes are captured as they happen; it rewrites only this route's key
 // and the small index.
@@ -208,7 +165,6 @@ export function archiveRoute(snap: RouteSnapshot) {
   const kv = store();
   if (!kv) return;
   try {
-    migrateLegacy(kv);
     const now = new Date().toISOString();
     const index = readIndex(kv);
     const startedAt =
@@ -226,7 +182,6 @@ export function getArchivedRouteIndex(): ArchivedRouteSummary[] {
   const kv = store();
   if (!kv) return [];
   try {
-    migrateLegacy(kv);
     return readIndex(kv).sort(newestFirst);
   } catch {
     return [];
@@ -238,7 +193,6 @@ export function getArchivedRoute(routeId: string): ArchivedRoute | undefined {
   const kv = store();
   if (!kv) return undefined;
   try {
-    migrateLegacy(kv);
     return readRoute(kv, routeId);
   } catch {
     return undefined;
