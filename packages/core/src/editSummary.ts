@@ -1,9 +1,17 @@
 import type { EditAction, EditExtras } from "./schemas";
 
-// Local YYYY-MM-DD. Safe in the browser (no node deps), mirrors lib/osm todayIso
-// so the optimistic client summary matches what the server will write.
+// The calendar day of `d` on this device, as YYYY-MM-DD.
+export function localIsoDate(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+// The device's calendar date: the day the surveyor is out there, which
+// toISOString() would not give (it is UTC, already tomorrow on a US evening
+// run). The outbox sends it with each edit as surveyDate, so the check_date OSM
+// receives matches this optimistic summary.
 export function todayLocal(): string {
-  return new Date().toISOString().slice(0, 10);
+  return localIsoDate(new Date());
 }
 
 // Human-readable summary of an edit. Shared by the server edit route (real write)

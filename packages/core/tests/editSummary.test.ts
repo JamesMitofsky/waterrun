@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { editSummary, todayLocal } from "../src/editSummary";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { editSummary, localIsoDate, todayLocal } from "../src/editSummary";
 
 const T = "2026-01-02";
 
@@ -68,8 +68,32 @@ describe("editSummary", () => {
 });
 
 describe("todayLocal", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("returns an ISO date string for today", () => {
     expect(todayLocal()).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    expect(todayLocal()).toBe(new Date().toISOString().slice(0, 10));
+  });
+
+  it("uses the device's calendar date, not the UTC one", () => {
+    vi.useFakeTimers();
+    // 7:30 pm on 4 July in Los Angeles is already 5 July in UTC.
+    vi.setSystemTime(new Date("2026-07-05T02:30:00.000Z"));
+    vi.stubEnv("TZ", "America/Los_Angeles");
+    expect(todayLocal()).toBe("2026-07-04");
+
+    // 8:30 am on 5 July in Sydney is still 4 July in UTC.
+    vi.setSystemTime(new Date("2026-07-04T22:30:00.000Z"));
+    vi.stubEnv("TZ", "Australia/Sydney");
+    expect(todayLocal()).toBe("2026-07-05");
+  });
+});
+
+describe("localIsoDate", () => {
+  it("gives the device's calendar day of any moment", () => {
+    vi.stubEnv("TZ", "America/New_York");
+    expect(localIsoDate(new Date("2026-03-01T03:00:00.000Z"))).toBe("2026-02-28");
+    expect(localIsoDate(new Date("2026-03-01T05:00:00.000Z"))).toBe("2026-03-01");
   });
 });
