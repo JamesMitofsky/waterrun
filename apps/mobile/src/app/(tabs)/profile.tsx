@@ -1,7 +1,8 @@
+import { useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { withUniwind } from "uniwind";
-import { useRouter } from "expo-router";
+import { useIsFocused, useRouter } from "expo-router";
 import { SafeArea } from "../../components/ui/SafeArea";
 import { getArchivedRoutes } from "@rosm/core/routeArchive";
 import { fmtDist } from "@rosm/core/geo";
@@ -18,10 +19,24 @@ const StyledImage = withUniwind(Image);
 const surveyedCount = (stops: { status: string }[]) =>
   stops.filter((s) => s.status !== "pending" && s.status !== "skipped").length;
 
+// True from the first time this tab is shown. Native tabs render every tab at
+// launch (expo-router has no lazy option), and this one would otherwise fetch
+// the OSM account and read the run archive behind the landing tab.
+function useOpenedOnce(): boolean {
+  const focused = useIsFocused();
+  const [opened, setOpened] = useState(focused);
+  if (focused && !opened) setOpened(true);
+  return opened;
+}
+
 // Who you are on OSM, your run history, and the way out — a mirror of the web
 // AccountCard. Sign-out clears the keychain token; the router auth gate then flips
 // to the login screen.
 export default function Profile() {
+  return useOpenedOnce() ? <ProfileContent /> : <View className="bg-surface flex-1" />;
+}
+
+function ProfileContent() {
   const router = useRouter();
   const { status } = useOsmStatus();
   const user = useOsmUser();

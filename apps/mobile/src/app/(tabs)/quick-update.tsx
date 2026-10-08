@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { useIsFocused } from "expo-router";
 import { SafeArea } from "../../components/ui/SafeArea";
 import type { Fountain, EditExtras } from "@rosm/core/schemas";
 import type { StopStatus } from "@rosm/core/stores/run";
@@ -71,6 +72,8 @@ export default function QuickUpdate() {
   const [region, setRegion] = useState<RosmRegion | null>(null);
   // Bumped to move the map to `center` when a fresh fix corrects the first one.
   const [recenterKey, setRecenterKey] = useState(0);
+  // The map only draws the device's location while this tab is on screen.
+  const isFocused = useIsFocused();
 
   // Only the latest search may show its results: the search made from a
   // fresh fix can overlap the one made from the first.
@@ -206,7 +209,7 @@ export default function QuickUpdate() {
         <RosmMap
           center={[center.lat, center.lon]}
           markers={markers}
-          showUserLocation
+          showUserLocation={isFocused}
           recenterKey={String(recenterKey)}
           animateRecenter
           onRegionChange={setRegion}

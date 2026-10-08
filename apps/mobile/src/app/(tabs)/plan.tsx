@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Text, View } from "react-native";
-import { useRouter } from "expo-router";
+import { useIsFocused, useRouter } from "expo-router";
 import { PointSheetHost } from "../../components/ui/PointSheetHost";
 import { usePlanner, inRouteIdsOf } from "@rosm/core/stores/planner";
 import { fmtDist } from "@rosm/core/geo";
@@ -21,12 +21,29 @@ function markLabel(f: Fountain) {
   return f.tags.name ?? "Unnamed fountain";
 }
 
+// True from the first time this tab is shown. Native tabs render every tab at
+// launch (expo-router has no lazy option), and this one would otherwise start
+// a second map, a GPS fix, a 4-mile search and the resume offer behind the
+// landing tab.
+function useOpenedOnce(): boolean {
+  const focused = useIsFocused();
+  const [opened, setOpened] = useState(focused);
+  if (focused && !opened) setOpened(true);
+  return opened;
+}
+
 // The Survey tab: a single persistent map for the whole planner lifetime, with
 // the config wizard / route builder / run-in-progress card swapping in a bottom
 // panel over it (the web planner keeps one MapView the same way). The run phase
 // itself lives on the standalone /run screen.
 export default function Plan() {
+  return useOpenedOnce() ? <PlanContent /> : <View className="bg-surface flex-1" />;
+}
+
+function PlanContent() {
   const router = useRouter();
+  // The map only draws the device's location while this tab is on screen.
+  const isFocused = useIsFocused();
 
   // Narrow slices only — the map re-diffs its native sources on prop changes,
   // so busy/err churn in the panels must not reach it.
@@ -156,7 +173,7 @@ export default function Plan() {
         line={line}
         // A start exists once location was granted and fixed, or the user
         // tapped one in; with location denied the puck just has nothing to show.
-        showUserLocation={center !== null}
+        showUserLocation={isFocused && center !== null}
         recenterKey={recenterKey}
         animateRecenter={animateRecenter}
         onMapPress={onMapPress}
