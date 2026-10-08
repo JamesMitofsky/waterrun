@@ -1,15 +1,23 @@
-import { z } from "zod";
-
 // Formspree is a hosted form backend: the browser POSTs straight to an endpoint
 // and submissions land in its dashboard/inbox, so the site keeps no server code
 // and no database for them. Endpoints come from PUBLIC_ env vars (one per form)
 // so each environment can point at its own inbox.
 
-// The slice of Formspree's JSON error body we read. Anything else (or a
-// non-JSON body) falls through to the generic message.
-const formspreeError = z.object({
-  errors: z.array(z.object({ message: z.string() })).optional(),
-});
+/**
+ * The first message in Formspree's JSON error body (`{ errors: [{ message }] }`),
+ * the only slice of it we read. Anything else, a non-JSON body included, is
+ * `undefined` and falls through to the generic message. A hand-rolled guard
+ * rather than a zod schema: this module ships to the browser with the forms,
+ * and zod was most of their JS for one optional field.
+ */
+function firstError(body: unknown): string | undefined {
+  if (typeof body !== "object" || body === null || !("errors" in body)) return undefined;
+  const { errors } = body;
+  if (!Array.isArray(errors)) return undefined;
+  const first: unknown = errors[0];
+  if (typeof first !== "object" || first === null || !("message" in first)) return undefined;
+  return typeof first.message === "string" ? first.message : undefined;
+}
 
 export type FormspreeResult = { ok: true } | { ok: false; message: string };
 
@@ -33,12 +41,10 @@ export async function submitToFormspree(
       body: JSON.stringify(payload),
     });
     if (res.ok) return { ok: true };
-    const parsed = formspreeError.safeParse(await res.json().catch(() => null));
     return {
       ok: false,
       message:
-        (parsed.success && parsed.data.errors?.[0]?.message) ||
-        "Something went wrong. Please try again.",
+        firstError(await res.json().catch(() => null)) || "Something went wrong. Please try again.",
     };
   } catch {
     return { ok: false, message: "Network error. Please try again." };

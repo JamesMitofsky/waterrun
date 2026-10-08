@@ -349,7 +349,9 @@ const frameCss = aspectCss + sizeCss + spinnerCss;
    * sync between an Astro page and a Svelte component, and any number of maps
    * on a page each clear their own frame.
    */
-  import { MAP_REVEAL_MS } from "@/lib/basemap/frames";
+  // From the leaf module, not `frames.ts`: that one has to ship whole, demo
+  // route included, wherever it is imported (see `reveal.ts`).
+  import { MAP_REVEAL_MS } from "@/lib/basemap/reveal";
   /**
    * Backstop for the unmount only. The overlay normally leaves the tree when its
    * fade actually finishes — see the `transitionend` handler — and this covers

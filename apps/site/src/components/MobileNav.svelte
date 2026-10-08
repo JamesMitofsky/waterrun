@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { List, X, MapTrifold, House, Bell } from "phosphor-svelte";
   import { fade, fly, scale } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import { prefersReducedMotion } from "svelte/motion";
@@ -7,6 +6,10 @@
   // Mobile-only nav. The desktop header renders its links inline; below `sm`
   // those are hidden and this hamburger takes over.
   // `currentPath` marks the row for the page the visitor is on (see Layout).
+  // The glyphs are Phosphor's own paths written out — List and X in the
+  // regular weight, the rows in fill, the same paths the desktop nav in Layout
+  // inlines — rather than its components: each of those carries all six
+  // weights, and this island ships on every page.
   let { inverted = false, currentPath = "" }: { inverted?: boolean; currentPath?: string } =
     $props();
   let open = $state(false);
@@ -40,10 +43,32 @@
          through each other rather than popping in place. -->
     <span class="grid h-8 w-8 place-items-center">
       <span class="icon" class:hidden-icon={open}>
-        <List class="h-8 w-8" weight="regular" />
+        <svg
+          class="h-8 w-8"
+          width="32"
+          height="32"
+          viewBox="0 0 256 256"
+          fill="currentColor"
+          aria-hidden="true"
+        >
+          <path
+            d="M224,128a8,8,0,0,1-8,8H40a8,8,0,0,1,0-16H216A8,8,0,0,1,224,128ZM40,72H216a8,8,0,0,0,0-16H40a8,8,0,0,0,0,16ZM216,184H40a8,8,0,0,0,0,16H216a8,8,0,0,0,0-16Z"
+          ></path>
+        </svg>
       </span>
       <span class="icon" class:hidden-icon={!open}>
-        <X class="h-8 w-8" weight="regular" />
+        <svg
+          class="h-8 w-8"
+          width="32"
+          height="32"
+          viewBox="0 0 256 256"
+          fill="currentColor"
+          aria-hidden="true"
+        >
+          <path
+            d="M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z"
+          ></path>
+        </svg>
       </span>
     </span>
   </button>
@@ -79,7 +104,18 @@
         in:fly={{ y: -6, duration: ms(220), delay: ms(50), easing: cubicOut }}
         class="row inline-flex items-center gap-2 rounded-xl px-3 py-2.5 text-lg text-light-muted transition duration-200 ease-out hover:bg-blue/5 hover:text-blue current-page:text-blue"
       >
-        <House class="h-5 w-5" weight="fill" />
+        <svg
+          class="h-5 w-5"
+          width="20"
+          height="20"
+          viewBox="0 0 256 256"
+          fill="currentColor"
+          aria-hidden="true"
+        >
+          <path
+            d="M224,120v96a8,8,0,0,1-8,8H160a8,8,0,0,1-8-8V164a4,4,0,0,0-4-4H108a4,4,0,0,0-4,4v52a8,8,0,0,1-8,8H40a8,8,0,0,1-8-8V120a16,16,0,0,1,4.69-11.31l80-80a16,16,0,0,1,22.62,0l80,80A16,16,0,0,1,224,120Z"
+          ></path>
+        </svg>
         Home
       </a>
       <a
@@ -89,7 +125,18 @@
         in:fly={{ y: -6, duration: ms(220), delay: ms(95), easing: cubicOut }}
         class="row inline-flex items-center gap-2 rounded-xl px-3 py-2.5 text-lg text-light-muted transition duration-200 ease-out hover:bg-blue/5 hover:text-blue current-page:text-blue"
       >
-        <MapTrifold class="h-5 w-5" weight="fill" />
+        <svg
+          class="h-5 w-5"
+          width="20"
+          height="20"
+          viewBox="0 0 256 256"
+          fill="currentColor"
+          aria-hidden="true"
+        >
+          <path
+            d="M228.92,49.69a8,8,0,0,0-6.86-1.45L160.93,63.52,99.58,32.84a8,8,0,0,0-5.52-.6l-64,16A8,8,0,0,0,24,56V200a8,8,0,0,0,9.94,7.76l61.13-15.28,61.35,30.68A8.15,8.15,0,0,0,160,224a8,8,0,0,0,1.94-.24l64-16A8,8,0,0,0,232,200V56A8,8,0,0,0,228.92,49.69ZM96,176a8,8,0,0,0-1.94.24L40,189.75V62.25L95.07,48.48l.93.46Zm120,17.75-55.07,13.77-.93-.46V80a8,8,0,0,0,1.94-.23L216,66.25Z"
+          ></path>
+        </svg>
         Map
       </a>
       <a
@@ -99,7 +146,18 @@
         in:fly={{ y: -6, duration: ms(220), delay: ms(140), easing: cubicOut }}
         class="row inline-flex items-center gap-2 rounded-xl px-3 py-2.5 text-lg text-light-muted transition duration-200 ease-out hover:bg-blue/5 hover:text-blue current-page:text-blue"
       >
-        <Bell class="h-5 w-5" weight="fill" />
+        <svg
+          class="h-5 w-5"
+          width="20"
+          height="20"
+          viewBox="0 0 256 256"
+          fill="currentColor"
+          aria-hidden="true"
+        >
+          <path
+            d="M221.8,175.94C216.25,166.38,208,139.33,208,104a80,80,0,1,0-160,0c0,35.34-8.26,62.38-13.81,71.94A16,16,0,0,0,48,200H88.81a40,40,0,0,0,78.38,0H208a16,16,0,0,0,13.8-24.06ZM128,216a24,24,0,0,1-22.62-16h45.24A24,24,0,0,1,128,216Z"
+          ></path>
+        </svg>
         Waitlist
       </a>
     </div>

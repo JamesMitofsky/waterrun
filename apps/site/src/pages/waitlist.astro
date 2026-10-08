@@ -1,12 +1,13 @@
 ---
 import ContentPage from "@/layouts/ContentPage.astro";
 import WaitlistForm from "@/components/WaitlistForm.svelte";
+import { APP_NAME } from "@/lib/appConfig";
 
 export const prerender = true;
 ---
 
 <ContentPage
-  title="Join the waitlist — Water Run"
+  title={`Join the waitlist — ${APP_NAME}`}
   description="Access is opening in waves. Add yourself to the waitlist and we'll send an invite when your spot comes up."
   heading="Join the waitlist"
 >
