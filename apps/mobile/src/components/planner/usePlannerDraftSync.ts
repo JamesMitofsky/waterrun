@@ -1,13 +1,22 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import { AppState } from "react-native";
 import { useShallow } from "zustand/react/shallow";
 import { usePlanner, type Draft } from "@rosm/core/stores/planner";
 import { api } from "../../ports/api";
+
+// How long the route has to sit still before it is saved. One tap changes it
+// twice (the picks, then the re-planned route a moment later), and each save
+// serializes the whole draft, every point found included, then writes it
+// synchronously on the JS thread.
+const SAVE_DELAY_MS = 500;
 
 // Contract: the in-progress planner route persists to /api/draft on every
 // change so a force-quit can offer to resume it. On mobile /api/draft is
 // backed by the device kv store (see ports/api.ts). Skipped until the initial
 // load runs, while a resume offer is pending, and before any route exists —
-// identical gating to the web hook.
+// identical gating to the web hook. Saves are coalesced (SAVE_DELAY_MS), and
+// one still waiting goes out at once when the app leaves the foreground, the
+// last moment before a kill.
 export function usePlannerDraftSync() {
   // Mount: look for a saved route from a prior session.
   useEffect(() => {
@@ -43,9 +52,15 @@ export function usePlannerDraftSync() {
     })),
   );
 
+  const pending = useRef<Draft | null>(null);
+
   useEffect(() => {
-    if (!slice.draftReady || slice.resumable || slice.stops.length === 0) return;
-    const draft: Draft = {
+    if (!slice.draftReady || slice.resumable || slice.stops.length === 0) {
+      // Nothing to save now, and a draft still waiting is no longer the route.
+      pending.current = null;
+      return;
+    }
+    pending.current = {
       center: slice.center!,
       tag: slice.tag,
       radiusMi: slice.radiusMi,
@@ -65,12 +80,33 @@ export function usePlannerDraftSync() {
       turns: slice.turns,
       autoCount: slice.autoCount,
     };
-    api
-      .apiFetch("/api/draft", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(draft),
-      })
-      .catch(() => {});
+    const t = setTimeout(() => savePending(pending), SAVE_DELAY_MS);
+    return () => clearTimeout(t);
   }, [slice]);
+
+  // Leaving the foreground, or the planner going away, saves what's waiting.
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state !== "active") savePending(pending);
+    });
+    return () => {
+      sub.remove();
+      savePending(pending);
+    };
+  }, []);
+}
+
+function savePending(pending: { current: Draft | null }) {
+  const draft = pending.current;
+  pending.current = null;
+  // Starting a run deletes the draft; a save that was still waiting must not
+  // bring it back, or the next launch would offer to resume a route already run.
+  if (!draft || usePlanner.getState().phase === "run") return;
+  api
+    .apiFetch("/api/draft", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(draft),
+    })
+    .catch(() => {});
 }
