@@ -110,8 +110,14 @@ export default function QuickUpdate() {
   }, []);
 
   // Once the user has moved the map or opened a point, they are using what's
-  // on screen, and a fresh fix no longer redoes the search under them.
+  // on screen, and a fresh fix no longer redoes the search under them. A move
+  // counts from the moment it starts: `region` only arrives once the map
+  // settles, after any fling, and a fix landing before then would recenter
+  // the map in the middle of the gesture.
   const userActed = useRef(false);
+  const onUserMove = () => {
+    userActed.current = true;
+  };
   useEffect(() => {
     if (region != null || selectedId != null) userActed.current = true;
   }, [region, selectedId]);
@@ -213,6 +219,7 @@ export default function QuickUpdate() {
           recenterKey={String(recenterKey)}
           animateRecenter
           onRegionChange={setRegion}
+          onUserMove={onUserMove}
           onMarkerPress={setSelectedId}
         />
       ) : (

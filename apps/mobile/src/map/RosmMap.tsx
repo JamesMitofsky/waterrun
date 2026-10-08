@@ -76,6 +76,9 @@ type Props = {
   onMapPress?: (lat: number, lon: number) => void;
   // Fires after a user-driven pan/zoom settles (not programmatic camera moves).
   onRegionChange?: (region: RosmRegion) => void;
+  // Fires as the user starts moving the map, before it settles: a caller that
+  // would move the camera itself can stand down while the finger is down.
+  onUserMove?: () => void;
   // The camera is the user's: it opens at `center` and then stays where they
   // put it. Each new key moves it to the current `center`/`zoom`.
   recenterKey?: string;
@@ -165,6 +168,7 @@ export function RosmMap({
   onMarkerPress,
   onMapPress,
   onRegionChange,
+  onUserMove,
   recenterKey,
   animateRecenter,
   fitPoints,
@@ -283,9 +287,9 @@ export function RosmMap({
 
   // Handlers read the latest callbacks through a ref, so each keeps one
   // identity for the life of the map (the marker source's memo depends on it).
-  const callbacks = useRef({ onMarkerPress, onMapPress, onRegionChange });
+  const callbacks = useRef({ onMarkerPress, onMapPress, onRegionChange, onUserMove });
   useEffect(() => {
-    callbacks.current = { onMarkerPress, onMapPress, onRegionChange };
+    callbacks.current = { onMarkerPress, onMapPress, onRegionChange, onUserMove };
   });
 
   // Marker taps are hit-tested natively by the source itself — the pressed
@@ -307,11 +311,13 @@ export function RosmMap({
   }, []);
 
   // The user taking the camera stops framing as the gesture starts, so the
-  // next fix doesn't pull the map out from under their finger.
+  // next fix doesn't pull the map out from under their finger. The caller is
+  // told at the same moment, for the camera moves it makes itself.
   const onRegionStart = useCallback((e: NativeSyntheticEvent<RegionEvent>) => {
     if (!e.nativeEvent.userInteraction) return;
     touched.current = true;
     setFraming(false);
+    callbacks.current.onUserMove?.();
   }, []);
 
   const onRegion = useCallback((e: NativeSyntheticEvent<RegionEvent>) => {
