@@ -145,10 +145,6 @@ export default function Plan() {
   }, []);
 
   const mapCenter: [number, number] = center ? [center.lat, center.lon] : [20, 0];
-  const userPos: [number, number] | null = useMemo(
-    () => (center ? [center.lat, center.lon] : null),
-    [center],
-  );
 
   return (
     <View className="bg-surface flex-1">
@@ -157,7 +153,9 @@ export default function Plan() {
         zoom={center ? 15 : 1.5}
         markers={markers}
         line={line}
-        userPos={userPos}
+        // A start exists once location was granted and fixed, or the user
+        // tapped one in; with location denied the puck just has nothing to show.
+        showUserLocation={center !== null}
         initialOnly
         recenterKey={recenterKey}
         onMapPress={onMapPress}

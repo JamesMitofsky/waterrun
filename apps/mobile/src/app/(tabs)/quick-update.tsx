@@ -180,7 +180,7 @@ export default function QuickUpdate() {
         <RosmMap
           center={[center.lat, center.lon]}
           markers={markers}
-          userPos={[center.lat, center.lon]}
+          showUserLocation
           initialOnly
           onRegionChange={setRegion}
           onMarkerPress={setSelectedId}

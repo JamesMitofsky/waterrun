@@ -164,6 +164,9 @@ export default function RunScreen() {
         center={s.center}
         markers={mapMarkers}
         line={s.line}
+        // A fix has come in, so location is permitted and the map's own puck
+        // (which follows the device by itself) can be shown.
+        showUserLocation={s.userPos !== null}
         userPos={s.userPos}
         recenterKey={s.recenterKey}
         fitPoints={s.fitPoints}

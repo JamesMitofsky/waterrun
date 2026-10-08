@@ -6,7 +6,7 @@ import {
   GeoJSONSource,
   Layer,
   Map,
-  UserLocation,
+  NativeUserLocation,
 } from "@maplibre/maplibre-react-native";
 import { CrosshairSimpleIcon } from "phosphor-react-native/src/icons/CrosshairSimple";
 import type { Feature, FeatureCollection, Point } from "geojson";
@@ -52,6 +52,9 @@ type Props = {
   bearing?: number;
   markers?: RosmMarker[];
   line?: [number, number][]; // [lat, lon][]
+  // The device's own location, drawn natively (a blue dot with a heading cone).
+  showUserLocation?: boolean;
+  // Where the location button takes the map.
   userPos?: [number, number] | null; // [lat, lon]
   onMarkerPress?: (id: RosmMarker["id"]) => void;
   onMapPress?: (lat: number, lon: number) => void;
@@ -152,6 +155,7 @@ export function RosmMap({
   zoom = 15,
   markers = [],
   line,
+  showUserLocation,
   userPos,
   onMarkerPress,
   onMapPress,
@@ -242,12 +246,12 @@ export function RosmMap({
           {MARKER_LAYERS}
         </GeoJSONSource>
 
-        {/* Native location puck: MapLibre tracks GPS itself (off the JS thread) and
-          draws the blue dot + heading arrow, instead of us re-feeding a GeoJSON
-          point every render. `userPos` presence gates it so planning/history
-          views (which don't pass it) stay dotless. minDisplacement throttles
-          updates to ~5m of movement. */}
-        {userPos ? <UserLocation animated heading accuracy minDisplacement={1} /> : null}
+        {/* MapLibre's own location puck: it follows the device and animates
+            the dot natively, so no location stream, animation frame or source
+            update runs through JS. */}
+        {showUserLocation ? (
+          <NativeUserLocation mode="heading" androidPreferredFramesPerSecond={30} />
+        ) : null}
       </Map>
 
       {showLocationButton && userPos ? (
