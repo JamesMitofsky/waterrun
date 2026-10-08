@@ -34,7 +34,7 @@ import type { MapMarker } from "../map/WaterRunMap";
 // Human-facing confirmation shown after a save. No raw OSM tags reach the UI.
 const SAVED_LABEL: Record<SurveyAction, string> = {
   confirm: "Working",
-  broken: "Broken",
+  broken: "Partially working",
   out_of_order: "Out of order",
   removed: "Removed",
 };

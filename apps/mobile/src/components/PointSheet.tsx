@@ -2,13 +2,17 @@ import { useRef, useState } from "react";
 import { Linking, Pressable, Text, View } from "react-native";
 import { ArrowSquareOutIcon } from "phosphor-react-native/src/icons/ArrowSquareOut";
 import { CheckCircleIcon } from "phosphor-react-native/src/icons/CheckCircle";
+import { DropHalfIcon } from "phosphor-react-native/src/icons/DropHalf";
+import { DropSlashIcon } from "phosphor-react-native/src/icons/DropSlash";
 import { SnowflakeIcon } from "phosphor-react-native/src/icons/Snowflake";
 import { TrashIcon } from "phosphor-react-native/src/icons/Trash";
 import { WarningIcon } from "phosphor-react-native/src/icons/Warning";
+import { WrenchIcon } from "phosphor-react-native/src/icons/Wrench";
 import { DogIcon } from "./icons/DogIcon";
+import { pointStatusLine } from "@water-run/core/pointStatus";
 import type { EditAction, EditExtras, Fountain } from "@water-run/core/schemas";
 import { useOutbox, type OutboxItem, type SyncState } from "@water-run/core/stores/outbox";
-import { PointDetailsForm } from "./PointDetailsForm";
+import { INK, PointDetailsForm, type Ink } from "./PointDetailsForm";
 
 export type SurveyAction = EditAction | "broken";
 
@@ -34,7 +38,7 @@ export function pointEditOf(item: OutboxItem): PointEdit {
 
 const STATUS_LABEL: Record<SurveyAction, string> = {
   confirm: "Confirmed working",
-  broken: "Marked working but broken",
+  broken: "Marked partially working",
   out_of_order: "Marked out of order",
   removed: "Marked removed",
 };
@@ -59,31 +63,79 @@ function isDogWater(tags: Record<string, string>): boolean {
   return tags.drinking_water === "no";
 }
 
-type ActionButton = {
-  action: "confirm" | "problem" | "removed";
-  title: string;
-  Icon: typeof CheckCircleIcon;
-  box: string;
-  secondary?: true;
-  borderClass?: string;
-  textColorClass?: string;
-  iconHex?: string;
+// The survey asks one question at a time, so a runner glancing down mid-run
+// only ever weighs two answers: working or not; if not, gone or broken; if
+// broken, how badly. Each leaf opens that action's details form.
+type Step = "choose" | "problem" | "broken";
+
+// The submit button of the details form behind each leaf of the steps above.
+// Amber takes dark ink: white on it is about 2:1, too faint to read at a
+// glance mid-run.
+const FORMS: Record<
+  SurveyAction,
+  { label: string; Icon: typeof CheckCircleIcon; box: string; ink?: Ink }
+> = {
+  confirm: { label: "Confirm working", Icon: CheckCircleIcon, box: "bg-green-600" },
+  broken: { label: "Mark partially working", Icon: DropHalfIcon, box: "bg-amber-500", ink: "dark" },
+  out_of_order: { label: "Mark out of order", Icon: DropSlashIcon, box: "bg-orange-600" },
+  removed: { label: "Confirm no fountain", Icon: TrashIcon, box: "bg-red-600" },
 };
 
-const ACTIONS: ActionButton[] = [
-  { action: "confirm", title: "Working", Icon: CheckCircleIcon, box: "bg-green-600" },
-  { action: "problem", title: "Broken", Icon: WarningIcon, box: "bg-orange-600" },
-  {
-    action: "removed",
-    title: "Removed",
-    Icon: TrashIcon,
-    box: "bg-red-600",
-    secondary: true,
-    borderClass: "border-2 border-red-600",
-    textColorClass: "text-red-600",
-    iconHex: "#dc2626",
-  },
-];
+type ChoiceButtonProps = {
+  title: string;
+  Icon: typeof CheckCircleIcon;
+  onPress: () => void;
+  // The fill of a solid button. Without one the button is outlined in red
+  // instead, the look kept for "No fountain": the one answer that says the
+  // fountain is gone rather than just not working.
+  box?: string;
+  // The label's and icon's color on that fill (see Ink).
+  ink?: Ink;
+};
+
+// A full-width answer, tall enough to hit one-handed mid-run.
+function ChoiceButton({ title, Icon, onPress, box, ink = "light" }: ChoiceButtonProps) {
+  const fg = box ? INK[ink] : { text: "text-red-600", hex: "#dc2626" };
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={title}
+      className={`flex-row items-center justify-center gap-2 rounded-xl px-4 py-8 ${
+        box ?? "border-2 border-red-600"
+      }`}
+    >
+      <Icon size={28} color={fg.hex} weight="bold" />
+      <Text className={`text-center text-xl font-bold ${fg.text}`}>{title}</Text>
+    </Pressable>
+  );
+}
+
+// Styled as the details form's section labels.
+function StepHeading({ title }: { title: string }) {
+  return (
+    <Text
+      accessibilityRole="header"
+      className="text-base text-xs font-bold tracking-wider uppercase"
+    >
+      {title}
+    </Text>
+  );
+}
+
+// Styled as the details form's Back, and left-aligned where that one sits.
+function BackButton({ onPress }: { onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel="Back"
+      className="border-border bg-surface-deep items-center justify-center self-start rounded-xl border px-4 py-3"
+    >
+      <Text className="text-base font-bold">Back</Text>
+    </Pressable>
+  );
+}
 
 type Props = {
   fountain: Fountain;
@@ -99,7 +151,10 @@ type Props = {
 
 export function PointSheet({ fountain, edit, onAction, inRoute, onToggleRoute }: Props) {
   const tags = fountain.tags ?? {};
-  const [detailFor, setDetailFor] = useState<"confirm" | "problem" | "removed" | null>(null);
+  const [step, setStep] = useState<Step>("choose");
+  // The step stays put while a form is open, so the form's Back lands on the
+  // step it was opened from.
+  const [detailFor, setDetailFor] = useState<SurveyAction | null>(null);
   const [saving, setSaving] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   // Set synchronously, so a second tap before the re-render can't submit twice.
@@ -108,9 +163,19 @@ export function PointSheet({ fountain, edit, onAction, inRoute, onToggleRoute }:
   const [prevId, setPrevId] = useState(fountain.id);
   if (prevId !== fountain.id) {
     setPrevId(fountain.id);
+    setStep("choose");
     setDetailFor(null);
     setFailure(null);
   }
+
+  // What OSM says about the point, shown over the survey steps only: the forms
+  // and the recorded edit say what is being or was just recorded, which this
+  // line would contradict. A point not in OSM yet (run.tsx's add sheet passes
+  // id -1, OSM's mark for an object still to be created) gets no line at all:
+  // its tags are only the defaults it was handed, so the line would report a
+  // state nobody mapped. The label needn't tick while the sheet is up.
+  const [now] = useState(() => Date.now());
+  const statusLine = fountain.id < 0 ? null : pointStatusLine(tags, now);
 
   const submit = async (action: SurveyAction, extras?: EditExtras) => {
     if (inFlight.current) return;
@@ -130,29 +195,8 @@ export function PointSheet({ fountain, edit, onAction, inRoute, onToggleRoute }:
       }
     }
     setDetailFor(null);
+    setStep("choose");
   };
-
-  const byAction = (action: ActionButton["action"]) => ACTIONS.find((a) => a.action === action)!;
-
-  const renderAction = (a: ActionButton, extra: string, showLabel = true) => (
-    <Pressable
-      onPress={() => setDetailFor(a.action)}
-      accessibilityRole="button"
-      accessibilityLabel={a.title}
-      className={`flex-row items-center justify-center gap-2 rounded-xl px-4 py-6 ${
-        a.secondary ? a.borderClass : a.box
-      } ${extra}`}
-    >
-      <a.Icon size={28} color={a.secondary ? a.iconHex! : "#ffffff"} weight="bold" />
-      {showLabel ? (
-        <Text
-          className={`text-center text-xl font-bold ${a.secondary ? a.textColorClass : "text-white"}`}
-        >
-          {a.title}
-        </Text>
-      ) : null}
-    </Pressable>
-  );
 
   return (
     <View className="gap-3.5 px-1 py-1">
@@ -224,18 +268,18 @@ export function PointSheet({ fountain, edit, onAction, inRoute, onToggleRoute }:
         <>
           <PointDetailsForm
             tags={tags}
-            submitLabel={detailFor === "confirm" ? "Confirm working" : "Confirm removed"}
-            SubmitIcon={detailFor === "confirm" ? CheckCircleIcon : TrashIcon}
-            submitBox={detailFor === "confirm" ? "bg-green-600" : "bg-red-600"}
+            submitLabel={FORMS[detailFor].label}
+            SubmitIcon={FORMS[detailFor].Icon}
+            submitBox={FORMS[detailFor].box}
+            submitInk={FORMS[detailFor].ink}
             isRemoved={detailFor === "removed"}
-            isProblem={detailFor === "problem"}
+            isOutOfOrder={detailFor === "out_of_order"}
+            isBroken={detailFor === "broken"}
             onCancel={() => {
               setDetailFor(null);
               setFailure(null);
             }}
-            onSubmit={(extras, action) =>
-              void submit(action ?? (detailFor as SurveyAction), extras)
-            }
+            onSubmit={(extras) => void submit(detailFor, extras)}
           />
           {saving ? (
             <Text className="text-muted text-sm font-semibold">Saving…</Text>
@@ -245,11 +289,59 @@ export function PointSheet({ fountain, edit, onAction, inRoute, onToggleRoute }:
         </>
       ) : (
         <View className="gap-5 py-1">
-          {renderAction(byAction("confirm"), "py-8")}
-          <View className="flex-row gap-5">
-            {renderAction(byAction("removed"), "px-8", false)}
-            {renderAction(byAction("problem"), "flex-1")}
-          </View>
+          {statusLine ? (
+            <Text className="text-muted text-sm font-semibold">{statusLine}</Text>
+          ) : null}
+          {step === "choose" ? (
+            <>
+              <ChoiceButton
+                title="Working"
+                Icon={CheckCircleIcon}
+                box="bg-green-600"
+                onPress={() => setDetailFor("confirm")}
+              />
+              <ChoiceButton
+                title="Problem"
+                Icon={WarningIcon}
+                box="bg-orange-600"
+                onPress={() => setStep("problem")}
+              />
+            </>
+          ) : step === "problem" ? (
+            <>
+              <StepHeading title="What's wrong?" />
+              <ChoiceButton
+                title="No fountain"
+                Icon={TrashIcon}
+                onPress={() => setDetailFor("removed")}
+              />
+              <ChoiceButton
+                title="Broken"
+                Icon={WrenchIcon}
+                box="bg-orange-600"
+                onPress={() => setStep("broken")}
+              />
+              <BackButton onPress={() => setStep("choose")} />
+            </>
+          ) : (
+            <>
+              <StepHeading title="How broken is it?" />
+              <ChoiceButton
+                title="Partially working"
+                Icon={DropHalfIcon}
+                box="bg-amber-500"
+                ink="dark"
+                onPress={() => setDetailFor("broken")}
+              />
+              <ChoiceButton
+                title="Totally out of order"
+                Icon={DropSlashIcon}
+                box="bg-orange-600"
+                onPress={() => setDetailFor("out_of_order")}
+              />
+              <BackButton onPress={() => setStep("problem")} />
+            </>
+          )}
         </View>
       )}
     </View>

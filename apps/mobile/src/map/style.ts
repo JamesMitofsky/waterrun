@@ -17,5 +17,11 @@ export const OSM_STYLE_JSON = JSON.stringify({
       attribution: "© OpenStreetMap contributors",
     },
   },
-  layers: [{ id: "osm-tiles", type: "raster", source: "osm" }],
+  layers: [
+    // OSM Carto's land color under the tiles. Until they arrive, or where one
+    // fails to, a map shows plain land instead of a blank canvas, so every map
+    // (Nearby, the planner, the run) reads as a map from its first frame.
+    { id: "background", type: "background", paint: { "background-color": "#f2efe9" } },
+    { id: "osm-tiles", type: "raster", source: "osm" },
+  ],
 });
