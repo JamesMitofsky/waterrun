@@ -1,20 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Text, View } from "react-native";
-import { useRouter } from "expo-router";
+import { ActivityIndicator, Alert, Platform, Text, View } from "react-native";
+import { useIsFocused, useRouter } from "expo-router";
 import { PointSheetHost } from "../../components/ui/PointSheetHost";
-import { usePlanner, inRouteIdsOf } from "@rosm/core/stores/planner";
-import { useRun } from "@rosm/core/stores/run";
-import { useOutbox } from "@rosm/core/stores/outbox";
+import { usePlanner, inRouteIdsOf, shouldAutoFindPoints } from "@rosm/core/stores/planner";
 import { fmtDist } from "@rosm/core/geo";
 import type { Fountain } from "@rosm/core/schemas";
 import { Button } from "../../components/ui/Button";
 import { RosmMap, type RosmMarker } from "../../map/RosmMap";
-import { getLastKnownPosition } from "../../ports/geolocation";
+import { recentFix } from "../../ports/locateFast";
 import { RouteBuilderPanel } from "../../components/planner/RouteBuilderPanel";
 import { PhaseNav } from "../../components/planner/PhaseNav";
 import { usePlannerMarkers } from "../../components/planner/usePlannerMarkers";
 import { usePlannerDraftSync } from "../../components/planner/usePlannerDraftSync";
 import { useOsmEdits } from "../../run/useOsmEdits";
+import { endRun } from "../../run/runLifecycle";
 import { PointSheet } from "../../components/PointSheet";
 import { hapticSelect } from "../../ports/haptics";
 
@@ -22,18 +21,41 @@ function markLabel(f: Fountain) {
   return f.tags.name ?? "Unnamed fountain";
 }
 
+// Room under the planner panel's last control. On Android expo-router already
+// ends each tab's content above the tab bar (a bottom-edge SafeAreaView), so
+// only the panel's own padding is needed there; on iOS the content runs on
+// under the tab bar and the home indicator.
+const PANEL_BOTTOM = Platform.OS === "android" ? "pb-5" : "pb-28";
+
+// True from the first time this tab is shown. Native tabs render every tab at
+// launch (expo-router has no lazy option), and this one would otherwise start
+// a second map, a GPS fix, a 4-mile search and the resume offer behind the
+// landing tab.
+function useOpenedOnce(): boolean {
+  const focused = useIsFocused();
+  const [opened, setOpened] = useState(focused);
+  if (focused && !opened) setOpened(true);
+  return opened;
+}
+
 // The Survey tab: a single persistent map for the whole planner lifetime, with
 // the config wizard / route builder / run-in-progress card swapping in a bottom
 // panel over it (the web planner keeps one MapView the same way). The run phase
 // itself lives on the standalone /run screen.
 export default function Plan() {
-  const router = useRouter();
+  return useOpenedOnce() ? <PlanContent /> : <View className="bg-surface flex-1" />;
+}
 
-  // Narrow slices only — the map re-diffs its native sources on prop changes,
-  // so busy/err churn in the panels must not reach it.
+function PlanContent() {
+  const router = useRouter();
+  // The map only draws the device's location while this tab is on screen.
+  const isFocused = useIsFocused();
+
+  // Narrow slices only, so unrelated planner churn doesn't re-render the map.
   const phase = usePlanner((s) => s.phase);
   const center = usePlanner((s) => s.center);
   const recenterKey = usePlanner((s) => s.recenterKey);
+  const animateRecenter = usePlanner((s) => s.animateRecenter);
   const line = usePlanner((s) => s.line);
   const tag = usePlanner((s) => s.tag);
   const fountains = usePlanner((s) => s.fountains);
@@ -42,7 +64,9 @@ export default function Plan() {
   const excludedIds = usePlanner((s) => s.excludedIds);
   const distanceM = usePlanner((s) => s.distanceM);
   const resumable = usePlanner((s) => s.resumable);
+  const draftReady = usePlanner((s) => s.draftReady);
   const busy = usePlanner((s) => s.busy);
+  const err = usePlanner((s) => s.err);
 
   usePlannerDraftSync();
   const { edits, updatePoint } = useOsmEdits({ tagKey: tag.key });
@@ -60,7 +84,9 @@ export default function Plan() {
     [stops, pinnedIds, excludedIds],
   );
 
-  // Auto-locate on mount: skip config phase and begin querying a 4 mile radius immediately.
+  // Auto-locate on mount: skip config phase and begin querying a 4 mile radius
+  // immediately. The phone's recent fix (when it has one fresh and close
+  // enough) places the start at once; the GPS fix then refines it.
   useEffect(() => {
     const s = usePlanner.getState();
     s.setRadiusMi(4);
@@ -70,39 +96,38 @@ export default function Plan() {
 
     (async () => {
       if (!usePlanner.getState().center) {
-        const quick = await getLastKnownPosition();
+        const quick = await recentFix();
         if (quick && !usePlanner.getState().center) {
-          usePlanner.getState().recenter({ lat: quick.lat, lon: quick.lon });
+          usePlanner.getState().recenter(quick);
         }
         usePlanner.getState().geolocate();
       }
     })();
   }, []);
 
-  // Whenever center becomes available in map phase with no fountains loaded yet, query points.
+  // Search for points once there is a start and nothing loaded, but not while
+  // a saved route is on offer: the search would wipe the stops the user may be
+  // about to restore. Turning the offer down lets it run.
   useEffect(() => {
-    if (
-      center &&
-      phase === "map" &&
-      fountains.length === 0 &&
-      busy === null &&
-      !usePlanner.getState().err
-    ) {
+    const fountainsCount = fountains.length;
+    if (shouldAutoFindPoints({ center, phase, fountainsCount, busy, err, draftReady, resumable })) {
       usePlanner.getState().findPoints();
     }
-  }, [center, phase, fountains.length, busy]);
+  }, [center, phase, fountains.length, busy, err, draftReady, resumable]);
 
-  // A saved route from a prior session — offer to resume it, natively.
+  // A saved route from a prior session — offer to resume it, natively. The
+  // choice restores the draft the offer showed, whatever happened meanwhile.
   useEffect(() => {
     if (!resumable) return;
-    Alert.alert(
-      "Resume your route?",
-      `${resumable.stops.length} stops · ${fmtDist(resumable.distanceM)}`,
-      [
-        { text: "Start fresh", onPress: () => usePlanner.getState().dismissDraft() },
-        { text: "Resume", isPreferred: true, onPress: () => usePlanner.getState().resumeDraft() },
-      ],
-    );
+    const draft = resumable;
+    Alert.alert("Resume your route?", `${draft.stops.length} stops · ${fmtDist(draft.distanceM)}`, [
+      { text: "Start fresh", onPress: () => usePlanner.getState().dismissDraft() },
+      {
+        text: "Resume",
+        isPreferred: true,
+        onPress: () => usePlanner.getState().resumeDraft(draft),
+      },
+    ]);
   }, [resumable]);
 
   // Config step 0: tap sets the start. Map phase: tap drops a via waypoint.
@@ -137,26 +162,15 @@ export default function Plan() {
     if (await usePlanner.getState().startRun()) router.replace("/run");
   }, [router]);
 
+  // The same teardown as Finish on the run screen: unsent edits stay queued.
   const confirmEndRun = useCallback(() => {
     Alert.alert("End this run?", "Progress is archived; queued edits keep syncing.", [
       { text: "Cancel", style: "cancel" },
-      {
-        text: "End run",
-        style: "destructive",
-        onPress: () => {
-          useRun.getState().reset();
-          useOutbox.getState().clear();
-          usePlanner.getState().resetAfterRun();
-        },
-      },
+      { text: "End run", style: "destructive", onPress: () => void endRun() },
     ]);
   }, []);
 
   const mapCenter: [number, number] = center ? [center.lat, center.lon] : [20, 0];
-  const userPos: [number, number] | null = useMemo(
-    () => (center ? [center.lat, center.lon] : null),
-    [center],
-  );
 
   return (
     <View className="bg-surface flex-1">
@@ -165,9 +179,11 @@ export default function Plan() {
         zoom={center ? 15 : 1.5}
         markers={markers}
         line={line}
-        userPos={userPos}
-        initialOnly
+        // A start exists once location was granted and fixed, or the user
+        // tapped one in; with location denied the puck just has nothing to show.
+        showUserLocation={isFocused && center !== null}
         recenterKey={recenterKey}
+        animateRecenter={animateRecenter}
         onMapPress={onMapPress}
         onMarkerPress={onMarkerPress}
       />
@@ -191,7 +207,9 @@ export default function Plan() {
 
       {/* Planner controls pinned to the bottom of the screen, full-width,
           matching the active-run panel in run.tsx. */}
-      <View className="bg-surface border-base/10 absolute right-0 bottom-0 left-0 border-t px-5 pt-5 pb-28">
+      <View
+        className={`bg-surface border-base/10 absolute right-0 bottom-0 left-0 border-t px-5 pt-5 ${PANEL_BOTTOM}`}
+      >
         {phase === "run" ? (
           <View className="gap-3">
             <Text className="text-base font-bold">

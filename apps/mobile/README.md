@@ -49,11 +49,13 @@ EXPO_PUBLIC_DEV_API_BASE=http://localhost:4321
 
 Expo inlines `EXPO_PUBLIC_*` at build time and loads `.env.local` for Release builds too
 (e.g. `ios:device:release-build`). That is why the local override is
-`EXPO_PUBLIC_DEV_API_BASE`, which the app ignores outside `__DEV__`. Do not put
-`EXPO_PUBLIC_API_BASE` in `.env.local`: it is the backend non-dev builds talk to, each EAS
-profile in [`eas.json`](./eas.json) sets it, and without it the app falls back to `apiBase`
-in `packages/core/appConfig.json`. Set it in a build profile only to point a non-dev build
-at a different backend, such as a preview deploy.
+`EXPO_PUBLIC_DEV_API_BASE`, which the app ignores outside `__DEV__`. Non-dev builds talk to
+`apiBase` in `packages/core/appConfig.json` (https://waterrun.app), the one place it is set;
+no EAS profile in [`eas.json`](./eas.json) overrides it. `EXPO_PUBLIC_API_BASE` replaces it
+at build time, so do not put it in `.env.local`; set it in a build profile only to point a
+non-dev build at a different backend, such as a preview deploy. The OSM token is kept per
+backend host, and a build that talks to waterrun.app takes over the token earlier builds
+kept for rosm.app, so the move signs nobody out.
 
 OSM sign-in reuses the site backend's `/api/osm/auth?native=1` flow and returns the token
 via the `rosm://osm-callback` deep link — so the backend must be reachable from the device,

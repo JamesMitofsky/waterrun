@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Linking, Pressable, Text, View } from "react-native";
 import { ArrowSquareOutIcon } from "phosphor-react-native/src/icons/ArrowSquareOut";
 import { CheckCircleIcon } from "phosphor-react-native/src/icons/CheckCircle";
@@ -7,7 +7,7 @@ import { TrashIcon } from "phosphor-react-native/src/icons/Trash";
 import { WarningIcon } from "phosphor-react-native/src/icons/Warning";
 import { DogIcon } from "./icons/DogIcon";
 import type { EditAction, EditExtras, Fountain } from "@rosm/core/schemas";
-import type { SyncState } from "@rosm/core/stores/outbox";
+import { useOutbox, type OutboxItem, type SyncState } from "@rosm/core/stores/outbox";
 import { PointDetailsForm } from "./PointDetailsForm";
 
 export type SurveyAction = EditAction | "broken";
@@ -15,9 +15,22 @@ export type SurveyAction = EditAction | "broken";
 export type PointEdit = {
   status: SurveyAction;
   syncState: SyncState;
+  // Why the last send failed. On a pending edit: it will be resent by itself.
+  error?: string;
   changesetUrl?: string;
   extras?: EditExtras;
 };
+
+// What the sheet shows for a queued edit.
+export function pointEditOf(item: OutboxItem): PointEdit {
+  return {
+    status: item.action,
+    syncState: item.syncState,
+    error: item.error,
+    changesetUrl: item.changesetUrl,
+    extras: item.extras,
+  };
+}
 
 const STATUS_LABEL: Record<SurveyAction, string> = {
   confirm: "Confirmed working",
@@ -26,12 +39,21 @@ const STATUS_LABEL: Record<SurveyAction, string> = {
   removed: "Marked removed",
 };
 
-const SYNC_LABEL: Record<SyncState, string> = {
-  pending: "Saved on device",
-  sending: "Syncing…",
-  sent: "Synced",
-  failed: "Sync failed — will retry",
-};
+// Where the edit is on its way to OSM (see SyncState). A pending edit with an
+// error has been tried and the outbox will resend it by itself; a failed one
+// it won't, so that one gets a Retry.
+function syncLabel(edit: PointEdit): string {
+  switch (edit.syncState) {
+    case "pending":
+      return edit.error ? "Waiting to send" : "Saved on device";
+    case "sending":
+      return "Syncing…";
+    case "sent":
+      return "Synced";
+    case "failed":
+      return "Couldn't sync";
+  }
+}
 
 function isDogWater(tags: Record<string, string>): boolean {
   return tags.drinking_water === "no";
@@ -66,7 +88,11 @@ const ACTIONS: ActionButton[] = [
 type Props = {
   fountain: Fountain;
   edit?: PointEdit;
-  onAction: (action: SurveyAction, extras?: EditExtras) => void;
+  // May return a promise, for an action that can fail where the user can't
+  // simply come back to it (adding a new point): the form then stays open with
+  // what was entered until it resolves, and a rejection's message shows under
+  // it so the user can try again.
+  onAction: (action: SurveyAction, extras?: EditExtras) => void | Promise<void>;
   inRoute?: boolean;
   onToggleRoute?: () => void;
 };
@@ -74,12 +100,37 @@ type Props = {
 export function PointSheet({ fountain, edit, onAction, inRoute, onToggleRoute }: Props) {
   const tags = fountain.tags ?? {};
   const [detailFor, setDetailFor] = useState<"confirm" | "problem" | "removed" | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+  // Set synchronously, so a second tap before the re-render can't submit twice.
+  const inFlight = useRef(false);
 
   const [prevId, setPrevId] = useState(fountain.id);
   if (prevId !== fountain.id) {
     setPrevId(fountain.id);
     setDetailFor(null);
+    setFailure(null);
   }
+
+  const submit = async (action: SurveyAction, extras?: EditExtras) => {
+    if (inFlight.current) return;
+    const result = onAction(action, extras);
+    if (result instanceof Promise) {
+      inFlight.current = true;
+      setSaving(true);
+      setFailure(null);
+      try {
+        await result;
+      } catch (e) {
+        setFailure(e instanceof Error ? e.message : String(e));
+        return;
+      } finally {
+        inFlight.current = false;
+        setSaving(false);
+      }
+    }
+    setDetailFor(null);
+  };
 
   const byAction = (action: ActionButton["action"]) => ACTIONS.find((a) => a.action === action)!;
 
@@ -143,7 +194,20 @@ export function PointSheet({ fountain, edit, onAction, inRoute, onToggleRoute }:
           {edit.extras?.note ? (
             <Text className="text-base text-xs font-medium italic">“{edit.extras.note}”</Text>
           ) : null}
-          <Text className="text-muted mt-0.5 text-xs font-bold">{SYNC_LABEL[edit.syncState]}</Text>
+          <View className="mt-0.5 flex-row items-center gap-3">
+            <Text className="text-muted text-xs font-bold">{syncLabel(edit)}</Text>
+            {edit.syncState === "failed" ? (
+              <Pressable
+                onPress={() => void useOutbox.getState().retryAll()}
+                accessibilityRole="button"
+                accessibilityLabel="Retry sending"
+                // A 16pt line of text; the slop makes it a 44pt target.
+                hitSlop={14}
+              >
+                <Text className="text-base text-xs font-bold underline">Retry</Text>
+              </Pressable>
+            ) : null}
+          </View>
           {edit.changesetUrl ? (
             <Pressable
               onPress={() => Linking.openURL(edit.changesetUrl!)}
@@ -157,19 +221,28 @@ export function PointSheet({ fountain, edit, onAction, inRoute, onToggleRoute }:
           ) : null}
         </View>
       ) : detailFor ? (
-        <PointDetailsForm
-          tags={tags}
-          submitLabel={detailFor === "confirm" ? "Confirm working" : "Confirm removed"}
-          SubmitIcon={detailFor === "confirm" ? CheckCircleIcon : TrashIcon}
-          submitBox={detailFor === "confirm" ? "bg-green-600" : "bg-red-600"}
-          isRemoved={detailFor === "removed"}
-          isProblem={detailFor === "problem"}
-          onCancel={() => setDetailFor(null)}
-          onSubmit={(extras, action) => {
-            onAction(action ?? (detailFor as SurveyAction), extras);
-            setDetailFor(null);
-          }}
-        />
+        <>
+          <PointDetailsForm
+            tags={tags}
+            submitLabel={detailFor === "confirm" ? "Confirm working" : "Confirm removed"}
+            SubmitIcon={detailFor === "confirm" ? CheckCircleIcon : TrashIcon}
+            submitBox={detailFor === "confirm" ? "bg-green-600" : "bg-red-600"}
+            isRemoved={detailFor === "removed"}
+            isProblem={detailFor === "problem"}
+            onCancel={() => {
+              setDetailFor(null);
+              setFailure(null);
+            }}
+            onSubmit={(extras, action) =>
+              void submit(action ?? (detailFor as SurveyAction), extras)
+            }
+          />
+          {saving ? (
+            <Text className="text-muted text-sm font-semibold">Saving…</Text>
+          ) : failure ? (
+            <Text className="text-sm font-semibold text-red-600">{failure}</Text>
+          ) : null}
+        </>
       ) : (
         <View className="gap-5 py-1">
           {renderAction(byAction("confirm"), "py-8")}

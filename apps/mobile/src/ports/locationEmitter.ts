@@ -2,7 +2,7 @@ import type { GeoPoint } from "@rosm/core/ports";
 
 // A tiny module-scope emitter that bridges the background TaskManager location task
 // (which runs outside React) to the run hook's subscribers. The task pushes points
-// here; watchRunPosition subscribes.
+// here; trackRun (tasks/runLocationTask) subscribes.
 const listeners = new Set<(p: GeoPoint) => void>();
 
 export function emitPoint(p: GeoPoint): void {

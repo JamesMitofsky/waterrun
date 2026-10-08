@@ -4,11 +4,11 @@ import cfg from "@rosm/core/appConfig.json";
 import { getToken } from "../auth/authStore";
 import { kv } from "./storage";
 
-// Absolute base for the Water Run backend (the Astro /api endpoints on Vercel). EAS build
-// profiles inject EXPO_PUBLIC_API_BASE; a local `expo start` has no such env, so we
-// fall back to the shared appConfig default rather than emitting a relative URL —
-// on device a relative URL has no origin and crashes native modules (e.g. the OSM
-// auth session). Override via EXPO_PUBLIC_API_BASE when pointing at a preview backend.
+// Absolute base for the Water Run backend (the Astro /api endpoints on Vercel):
+// apiBase in the shared appConfig, the one place it is set, rather than a relative
+// URL — on device a relative URL has no origin and crashes native modules (e.g. the
+// OSM auth session). Override via EXPO_PUBLIC_API_BASE when pointing a build at a
+// preview backend.
 //
 // Dev-only override: EXPO_PUBLIC_DEV_API_BASE (loaded from apps/mobile/.env.local)
 // wins when __DEV__ is true, so Metro-served bundles route through a locally-run

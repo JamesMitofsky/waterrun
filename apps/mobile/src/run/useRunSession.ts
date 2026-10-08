@@ -1,17 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRun, type RunStop } from "@rosm/core/stores/run";
 import { useOutbox } from "@rosm/core/stores/outbox";
-import { runGuidance, ARRIVAL_RADIUS_M, PROXIMITY_RADIUS_M } from "@rosm/core/guidance";
-import { compass, routeHeadingAt, fmtDist, type Pt } from "@rosm/core/geo";
+import {
+  runGuidance,
+  guidanceWindow,
+  ARRIVAL_RADIUS_M,
+  PROXIMITY_RADIUS_M,
+} from "@rosm/core/guidance";
+import { compass, type Pt } from "@rosm/core/geo";
 import { ptLabel } from "@rosm/core/pointTypes";
 import { STATUS_COLOR } from "@rosm/core/editStatus";
-import { archiveRoute, getArchivedRoutes } from "@rosm/core/routeArchive";
+import { todayLocal } from "@rosm/core/editSummary";
+import { callApi, postJson, UNEXPECTED_REPLY } from "@rosm/core/apiCall";
+import { activeRunToResume, archiveRun, beginRun } from "@rosm/core/runLifecycle";
+import { progressLine } from "@rosm/core/runProgress";
 import type { EditAction, EditExtras, Fountain } from "@rosm/core/schemas";
 import type { SurveyAction } from "../components/PointSheet";
-import { api } from "../ports/api";
+import { getToken } from "../auth/authStore";
 import { useOsmStatus } from "../auth/useOsmStatus";
-import { watchRunPosition } from "../ports/geolocation";
-import type { GeoWatch } from "@rosm/core/ports";
+import { trackRun } from "../tasks/runLocationTask";
 import { hapticSuccess } from "../ports/haptics";
 import { keepAwake, allowSleep } from "../ports/keepAwake";
 import { celebratePoint } from "../ports/confetti";
@@ -19,7 +26,8 @@ import {
   ensureNotifyPermission,
   notifyProximity,
   notifyRunComplete,
-  updateLiveActivityNotification,
+  showRunProgress,
+  endRunProgress,
 } from "../ports/notify";
 import type { RosmMarker } from "../map/RosmMap";
 
@@ -31,52 +39,58 @@ const SAVED_LABEL: Record<SurveyAction, string> = {
   removed: "Removed",
 };
 
+// Same ceiling as an outbox send: a create that hangs on a dead cell must give
+// the add sheet its error back rather than spin.
+const CREATE_TIMEOUT_MS = 30_000;
+
+type CreatedNode = {
+  nodeId: number;
+  changesetId: number;
+  lat: number;
+  lon: number;
+  tags: Record<string, string>;
+};
+
 // The Expo run session: live GPS, the shared guidance derived from it, the OSM
 // recording actions, and marker DATA for RosmMap. Mirrors the web useRunSession
-// but returns markers as plain data (the screen owns the bottom sheet).
+// but returns markers as plain data (the screen owns the bottom sheet). Ending
+// the run is run/runLifecycle's endRun, not part of the session.
 export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
   const run = useRun();
-  const { status: osm, refresh: refreshOsm } = useOsmStatus();
+  const { status: osm } = useOsmStatus();
   const [pos, setPos] = useState<Pt | null>(null);
-  const [gpsHeading, setGpsHeading] = useState<number | null>(null);
   const [manualArrived, setManualArrived] = useState(false);
-  const [adding, setAdding] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [hydrating, setHydrating] = useState(() => enabled && !useRun.getState().hasPlan);
+  const [nothingToResume, setNothingToResume] = useState(false);
   const [lastSaved, setLastSaved] = useState<{ nodeId: number; label: string } | null>(null);
-  const [finishing, setFinishing] = useState(false);
-  const [closed, setClosed] = useState<{ changesetUrl?: string } | null>(null);
 
-  // Cold start (direct nav to /run): recover the most recent archived run.
+  // Cold start (/run reached with no run in memory, e.g. by a link): pick the
+  // active run back up by its id and under that id, so its archive entry keeps
+  // being the one updated. A finished run, or none, is nothing to resume.
   useEffect(() => {
     if (!enabled || useRun.getState().hasPlan) return;
     Promise.resolve().then(() => {
-      const latest = getArchivedRoutes()[0];
-      if (latest?.plan?.stops?.length) useRun.getState().hydrate(latest.plan);
+      const saved = activeRunToResume();
+      if (saved) useRun.getState().hydrate(saved);
+      else setNothingToResume(true);
       setHydrating(false);
     });
   }, [enabled]);
 
-  // Live position (background task via the geolocation port).
+  // Mark the run active, then follow it: the background location task, which
+  // runs only while a run is active and a screen listens (see
+  // tasks/runLocationTask).
+  const { hasPlan, routeId } = run;
   useEffect(() => {
-    if (!enabled) return;
-    let watch: GeoWatch | null = null;
-    let cancelled = false;
-    watchRunPosition(
-      (p) => {
-        setPos({ lat: p.lat, lon: p.lon });
-        if (p.heading != null) setGpsHeading(p.heading);
-      },
+    if (!enabled || !hasPlan) return;
+    beginRun();
+    const watch = trackRun(
+      (p) => setPos({ lat: p.lat, lon: p.lon }),
       (msg) => setErr(msg),
-    ).then((w) => {
-      if (cancelled) w.clear();
-      else watch = w;
-    });
-    return () => {
-      cancelled = true;
-      watch?.clear();
-    };
-  }, [enabled]);
+    );
+    return () => watch.clear();
+  }, [enabled, hasPlan, routeId]);
 
   // Keep the screen awake + ask for notification permission while armed.
   useEffect(() => {
@@ -86,16 +100,24 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
     return () => allowSleep();
   }, [enabled]);
 
-  const { stops, index, tagKey, tagValue, added, pool } = run;
+  const { stops, index, tagKey, tagValue, added, pool, routeCoords, turns } = run;
   const addLabel = ptLabel(tagKey, tagValue);
   const target: RunStop | undefined = stops[index];
-  const done = run.hasPlan && index >= stops.length;
+  const done = hasPlan && index >= stops.length;
 
+  // The stretch of route between the previous stop and this one, so the
+  // guidance doesn't latch onto another pass of a route that doubles back.
+  // Changes only with the stop, not with each fix.
+  const stretch = useMemo(
+    () => guidanceWindow(routeCoords, stops, index),
+    [routeCoords, stops, index],
+  );
   const { distToTarget, bearingTo, nextTurn, distToTurn, autoArrived } = runGuidance(
     pos,
     target ?? null,
-    run.routeCoords,
-    run.turns,
+    routeCoords,
+    turns,
+    stretch,
   );
   const heading = target ? compass(bearingTo) : "";
   const arrived = manualArrived || autoArrived;
@@ -114,16 +136,30 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
     }
   }, [enabled, target, distToTarget, index]);
 
-  // Update Live Activity lock screen state with distance to next fountain & turn maneuvers
+  // The lock-screen progress line. Handed every fix; the notifier decides
+  // whether it's worth a post. Taken down once every stop is done, and when the
+  // run leaves the screen.
   useEffect(() => {
-    if (!enabled || !target || distToTarget == null) return;
-    const name = target.tags?.name || `Stop #${index + 1}`;
-    const turnText =
-      nextTurn && distToTurn
-        ? `${nextTurn.angle < 180 ? "Right" : "Left"} in ${fmtDist(distToTurn)}`
-        : undefined;
-    updateLiveActivityNotification(name, distToTarget, turnText);
+    if (!enabled) return;
+    if (!target) {
+      endRunProgress();
+      return;
+    }
+    if (distToTarget == null) return;
+    showRunProgress(
+      progressLine({
+        stopKey: `${index}:${target.id}`,
+        stopName: target.tags?.name || `Stop #${index + 1}`,
+        distToStopM: distToTarget,
+        nextTurn,
+        distToTurnM: distToTurn,
+      }),
+    );
   }, [enabled, target, distToTarget, index, nextTurn, distToTurn]);
+  useEffect(() => {
+    if (!enabled) return;
+    return () => endRunProgress();
+  }, [enabled]);
 
   const notifiedDoneRef = useRef(false);
   useEffect(() => {
@@ -136,35 +172,12 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
     if (!done) notifiedDoneRef.current = false;
   }, [enabled, done, stops]);
 
-  const persist = useCallback(
-    (nextIndex: number, changesetId?: number) => {
-      const routeId = useRun.getState().routeId;
-      const plan = {
-        start: run.start,
-        loop: run.loop,
-        tagKey,
-        tagValue,
-        stops: useRun.getState().stops,
-        vias: run.vias,
-        pool: run.pool,
-        added: useRun.getState().added,
-        routeCoords: run.routeCoords,
-        distanceM: run.distanceM,
-        turns: run.turns,
-        index: nextIndex,
-        changesetId: changesetId ?? run.changesetId,
-      };
-      archiveRoute({ routeId, plan, edits: useOutbox.getState().items });
-    },
-    [run, tagKey, tagValue],
-  );
-
   const advance = useCallback(() => {
     const ni = index + 1;
     run.setIndex(ni);
     setManualArrived(false);
-    persist(ni);
-  }, [index, run, persist]);
+    archiveRun(ni);
+  }, [index, run]);
 
   const recordFor = useCallback(
     (node: Fountain, action: SurveyAction, extras?: EditExtras) => {
@@ -177,15 +190,13 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
       celebratePoint();
       hapticSuccess();
       setLastSaved({ nodeId: node.id, label: SAVED_LABEL[action] });
-      if (isCurrent) {
-        persist(index + 1);
-        advance();
-      } else {
-        persist(index);
-      }
+      // advance() archives the run at the next stop; a node off the current
+      // stop is archived where the run stands.
+      if (isCurrent) advance();
+      else archiveRun(index);
       useOutbox.getState().flush();
     },
-    [target, tagKey, run, index, persist, advance],
+    [target, tagKey, run, index, advance],
   );
 
   const record = useCallback(
@@ -211,114 +222,70 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
     setManualArrived(false);
     run.setStatus(stops[pi].id, "pending");
     run.setIndex(pi);
-    persist(pi);
-  }, [index, stops, run, persist]);
+    archiveRun(pi);
+  }, [index, stops, run]);
 
-  // Create a brand-new node of the surveyed type at a given spot (GPS position or tapped map location).
+  // Create a brand-new node of the surveyed type at a given spot (GPS position
+  // or tapped map location). Rejects with a message fit for the user, so the
+  // add sheet can keep what was entered for another try. Sent straight away,
+  // not queued like an edit: a create resent after a reply that was lost would
+  // add the point twice.
   const addAt = useCallback(
-    async (at: { lat: number; lon: number }, extras?: EditExtras) => {
-      if (!osm?.loggedIn) {
-        setErr("Sign in to OSM first.");
-        return;
-      }
-      setAdding(true);
+    async (at: { lat: number; lon: number }, extras?: EditExtras): Promise<void> => {
+      // The token is the sign-in: the status endpoint can't tell signed out
+      // from offline.
+      if (!getToken()) throw new Error("Sign in to OSM first.");
       setErr(null);
       setLastSaved(null);
-      try {
-        const r = await api.apiFetch("/api/osm/create", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            lat: at.lat,
-            lon: at.lon,
-            tag: { key: tagKey, value: tagValue },
-            changesetId: useOutbox.getState().changesetId,
-            extras,
-          }),
-        });
-        const j = await r.json();
-        if (!r.ok) throw new Error(j.error || "create failed");
-        useOutbox.getState().setChangeset(j.changesetId);
-        run.addNode({ id: j.nodeId, lat: j.lat, lon: j.lon, tags: j.tags });
-        celebratePoint();
-        hapticSuccess();
-        setLastSaved({ nodeId: j.nodeId, label: "Added" });
-        persist(index, j.changesetId);
-      } catch (e) {
-        setErr((e as Error).message);
-      } finally {
-        setAdding(false);
-      }
+      const reply = await callApi<CreatedNode>(
+        "/api/osm/create",
+        postJson({
+          lat: at.lat,
+          lon: at.lon,
+          tag: { key: tagKey, value: tagValue },
+          changesetId: useOutbox.getState().changesetId,
+          extras,
+          surveyDate: todayLocal(),
+        }),
+        CREATE_TIMEOUT_MS,
+        "Couldn't add the point. Please try again.",
+      );
+      if (!reply.ok) throw new Error(reply.message);
+      const j = reply.data;
+      if (typeof j?.nodeId !== "number") throw new Error(UNEXPECTED_REPLY);
+      useOutbox.getState().setChangeset(j.changesetId);
+      run.setChangeset(j.changesetId);
+      run.addNode({ id: j.nodeId, lat: j.lat, lon: j.lon, tags: j.tags });
+      celebratePoint();
+      hapticSuccess();
+      setLastSaved({ nodeId: j.nodeId, label: "Added" });
+      archiveRun(index);
     },
-    [osm, tagKey, tagValue, run, index, persist],
+    [tagKey, tagValue, run, index],
   );
 
   const addHere = useCallback(async () => {
-    if (!osm?.loggedIn) {
-      setErr("Sign in to OSM first.");
-      return;
-    }
     if (!pos) {
       setErr("Waiting for GPS fix.");
       return;
     }
-    await addAt(pos);
-  }, [osm, pos, addAt]);
+    await addAt(pos).catch((e: Error) => setErr(e.message));
+  }, [pos, addAt]);
 
-  // Close the OSM changeset and mark the run done. Returns true on success so
-  // the screen can navigate to the run summary only when the run really ended.
-  const finish = useCallback(async (): Promise<boolean> => {
-    setFinishing(true);
-    try {
-      const changesetId = useOutbox.getState().changesetId;
-      if (changesetId) {
-        const r = await api.apiFetch("/api/osm/close", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ changesetId }),
-        });
-        const j = await r.json();
-        const alreadyClosed = typeof j.error === "string" && /was closed/i.test(j.error);
-        if ((!r.ok || j.ok === false) && !alreadyClosed) throw new Error(j.error || "close failed");
-        useOutbox.getState().setChangeset(undefined);
-        setClosed({ changesetUrl: j.changesetUrl });
-      } else {
-        setClosed({});
-      }
-      return true;
-    } catch (e) {
-      setErr((e as Error).message);
-      return false;
-    } finally {
-      setFinishing(false);
-    }
-  }, []);
-
-  const reset = useCallback(() => {
-    run.reset();
-    useOutbox.getState().clear();
-  }, [run]);
+  // The panel's error line, for a failure whose own UI has gone: an add whose
+  // sheet was swiped away while it saved.
+  const reportError = useCallback((message: string) => setErr(message), []);
 
   const endEarly = useCallback(() => {
     setLastSaved(null);
     setManualArrived(false);
     run.setIndex(stops.length);
-    persist(stops.length);
-  }, [stops.length, run, persist]);
-
-  const mapBearing = useMemo(
-    () =>
-      pos && run.routeCoords.length > 1
-        ? (routeHeadingAt(run.routeCoords, pos) ?? (target ? bearingTo : gpsHeading))
-        : pos && target
-          ? bearingTo
-          : gpsHeading,
-    [pos, run.routeCoords, target, bearingTo, gpsHeading],
-  );
+    archiveRun(stops.length);
+  }, [stops.length, run]);
 
   const line: [number, number][] = useMemo(
-    () => run.routeCoords.map(([lon, lat]) => [lat, lon]),
-    [run.routeCoords],
+    () => routeCoords.map(([lon, lat]) => [lat, lon]),
+    [routeCoords],
   );
 
   const markers: RosmMarker[] = useMemo(() => {
@@ -343,36 +310,39 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
     return [...dimMarkers, ...stopMarkers, ...addedMarkers];
   }, [stops, index, added, pool]);
 
+  // Where the map opens before there is a fix to frame.
   const center: [number, number] = pos
     ? [pos.lat, pos.lon]
     : target
       ? [target.lat, target.lon]
       : [run.start.lat, run.start.lon];
 
-  const fitPoints: [number, number][] | undefined =
-    pos && target
+  // What the map keeps in view: the runner and the stop they're heading for,
+  // or just the runner once every stop is done. The map refits as these move
+  // (until the user takes the camera), so they change only with a fix or a
+  // new stop.
+  const fitPoints = useMemo((): [number, number][] | undefined => {
+    if (!pos) return undefined;
+    return target
       ? [
           [pos.lat, pos.lon],
           [target.lat, target.lon],
         ]
-      : undefined;
-
-  const recenterKey =
-    (pos ? `${pos.lat.toFixed(4)},${pos.lon.toFixed(4)}` : "t") +
-    (target ? `|${target.lat.toFixed(4)},${target.lon.toFixed(4)}` : "");
+      : [[pos.lat, pos.lon]];
+  }, [pos, target]);
 
   return {
     markers,
     line,
     center,
-    userPos: pos ? ([pos.lat, pos.lon] as [number, number]) : null,
-    userHeading: gpsHeading,
-    mapBearing,
-    recenterKey,
     fitPoints,
+    // A fix has come in, so location is permitted and the map's own puck
+    // (which follows the device by itself) can be shown.
+    located: pos !== null,
     hydrating,
+    nothingToResume,
     done,
-    routeId: run.routeId,
+    routeId,
     stops,
     index,
     target,
@@ -385,12 +355,8 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
     added,
     pool,
     osm,
-    refreshOsm,
-    adding,
     err,
     lastSaved,
-    finishing,
-    closed,
     setManualArrived,
     recordFor,
     record,
@@ -399,8 +365,7 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
     endEarly,
     addHere,
     addAt,
-    finish,
-    reset,
+    reportError,
   };
 }
 
