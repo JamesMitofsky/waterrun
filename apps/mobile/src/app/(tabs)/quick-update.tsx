@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { SafeArea } from "../../components/ui/SafeArea";
 import type { Fountain, EditExtras } from "@rosm/core/schemas";
@@ -7,8 +7,9 @@ import { milesToMeters, haversine, boundsCenter, boundsRadiusM, type Pt } from "
 import { useOutbox } from "@rosm/core/stores/outbox";
 import { EDIT_COLOR, EDIT_LABEL } from "@rosm/core/editStatus";
 import { fountainDotStyle } from "@rosm/core/fountainFilters";
+import { shouldRefineSearch } from "@rosm/core/locate";
 import { api } from "../../ports/api";
-import { geolocation } from "../../ports/geolocation";
+import { locateFast } from "../../ports/locateFast";
 import { celebratePoint } from "../../ports/confetti";
 import { hapticSuccess } from "../../ports/haptics";
 import { PointSheetHost } from "../../components/ui/PointSheetHost";
@@ -68,9 +69,15 @@ export default function QuickUpdate() {
   // Where/how wide the current markers were fetched, and the live viewport.
   const [lastSearch, setLastSearch] = useState<Search | null>(null);
   const [region, setRegion] = useState<RosmRegion | null>(null);
+  // Bumped to move the map to `center` when a fresh fix corrects the first one.
+  const [recenterKey, setRecenterKey] = useState(0);
 
+  // Only the latest search may show its results: the search made from a
+  // fresh fix can overlap the one made from the first.
+  const searchSeq = useRef(0);
   const search = useCallback(async ({ center: c, radiusM }: Search) => {
     const capped = Math.min(radiusM, MAX_RADIUS_M);
+    const seq = ++searchSeq.current;
     setBusy(true);
     setErr(null);
     setSelectedId(null);
@@ -88,34 +95,53 @@ export default function QuickUpdate() {
         }),
       });
       const j = await r.json();
+      if (seq !== searchSeq.current) return;
       if (!r.ok) throw new Error(j.error?.message ?? "Couldn't load fountains.");
       setFountains(j.fountains as Fountain[]);
       setLastSearch({ center: c, radiusM: capped });
     } catch (e) {
-      setErr((e as Error).message);
+      if (seq === searchSeq.current) setErr((e as Error).message);
     } finally {
-      setBusy(false);
+      if (seq === searchSeq.current) setBusy(false);
     }
   }, []);
 
-  const load = useCallback(async () => {
-    setBusy(true);
-    setErr(null);
-    try {
-      const pos = await geolocation.getCurrentPosition();
-      setCenter(pos);
-      await search({ center: pos, radiusM: milesToMeters(RADIUS_MI) });
-    } catch (e) {
-      setErr((e as Error).message);
-      setBusy(false);
-    }
-  }, [search]);
-
+  // Once the user has moved the map or opened a point, they are using what's
+  // on screen, and a fresh fix no longer redoes the search under them.
+  const userActed = useRef(false);
   useEffect(() => {
-    // Fetch-on-mount: load() only setStates after awaits (locate + fetch).
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    load();
-  }, [load]);
+    if (region != null || selectedId != null) userActed.current = true;
+  }, [region, selectedId]);
+
+  // Open on the phone's recent fix at once, rather than a spinner for the
+  // whole GPS wait, and search there. The fresh fix then redoes the search
+  // only if it lands far enough away to change what's found.
+  useEffect(() => {
+    const radiusM = milesToMeters(RADIUS_MI);
+    let searchedFrom: Pt | null = null;
+    return locateFast(
+      ({ pos }) => {
+        if (searchedFrom) {
+          const refine = shouldRefineSearch({
+            searchedFrom,
+            radiusM,
+            fresh: pos,
+            fraction: REQUERY_FRACTION,
+            userActed: userActed.current,
+          });
+          if (!refine) return;
+          setRecenterKey((k) => k + 1);
+        }
+        searchedFrom = pos;
+        setCenter(pos);
+        void search({ center: pos, radiusM });
+      },
+      (e) => {
+        setErr(e instanceof Error ? e.message : String(e));
+        setBusy(false);
+      },
+    );
+  }, [search]);
 
   // Offer a re-query only once the map has moved meaningfully from the results.
   const canRequery =
@@ -181,6 +207,8 @@ export default function QuickUpdate() {
           center={[center.lat, center.lon]}
           markers={markers}
           showUserLocation
+          recenterKey={String(recenterKey)}
+          animateRecenter
           onRegionChange={setRegion}
           onMarkerPress={setSelectedId}
         />
