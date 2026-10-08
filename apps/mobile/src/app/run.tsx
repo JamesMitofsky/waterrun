@@ -8,6 +8,7 @@ import { SkipBackIcon } from "phosphor-react-native/src/icons/SkipBack";
 import { SkipForwardIcon } from "phosphor-react-native/src/icons/SkipForward";
 import { XCircleIcon } from "phosphor-react-native/src/icons/XCircle";
 import { DogIcon } from "../components/icons/DogIcon";
+import { checkedAgoLabel } from "@water-run/core/checkDate";
 import { fmtDist, maneuver } from "@water-run/core/geo";
 import { STATUS_COLOR } from "@water-run/core/editStatus";
 import { framePadding } from "@water-run/core/mapFrame";
@@ -19,24 +20,11 @@ import { endRun } from "../run/runLifecycle";
 import { PointSheet, pointEditOf } from "../components/PointSheet";
 import { Button } from "../components/ui/Button";
 
-function checkedAgoLabel(tags?: Record<string, string>, now: Date = new Date()): string {
-  const d = tags?.check_date ?? tags?.["check_date:drinking_water"];
-  if (!d) return "Not surveyed yet";
-  const diffMs = now.getTime() - new Date(d).getTime();
-  const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-  if (days <= 0) return "Checked today";
-  if (days === 1) return "Checked yesterday";
-  if (days < 30) return `Checked ${days} days ago`;
-  const months = Math.floor(days / 30);
-  if (months === 1) return "Checked 1 month ago";
-  return `Checked ${months} months ago`;
-}
-
 // Human-facing status shown in the end-of-run recap.
 const STATUS_LABEL: Record<StopStatus, string> = {
   pending: "Not surveyed",
   confirm: "Working",
-  broken: "Broken",
+  broken: "Partially working",
   out_of_order: "Out of order",
   removed: "Removed",
   skipped: "Skipped",
@@ -252,7 +240,11 @@ export default function RunScreen() {
                   ? `${maneuver(s.nextTurn.angle)} in ${fmtDist(s.distToTurn ?? 0)}`
                   : "Next stop")}
             </Text>
-            <Text className="text-light-muted">{checkedAgoLabel(s.target.tags, now)}</Text>
+            {/* Core's label, as the point sheet's status line uses: both read
+                the same survey keys, so the panel and the sheet agree. */}
+            <Text className="text-light-muted">
+              {checkedAgoLabel(s.target.tags ?? {}, now.getTime(), "long")}
+            </Text>
 
             {s.target.tags?.drinking_water === "no" ? (
               <View className="flex-row items-center gap-1.5">

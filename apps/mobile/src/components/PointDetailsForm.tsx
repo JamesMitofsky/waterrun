@@ -2,8 +2,6 @@ import { useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { CheckCircleIcon } from "phosphor-react-native/src/icons/CheckCircle";
 import { SnowflakeIcon } from "phosphor-react-native/src/icons/Snowflake";
-import { WarningIcon } from "phosphor-react-native/src/icons/Warning";
-import { WrenchIcon } from "phosphor-react-native/src/icons/Wrench";
 import type { Audience, Dispenser, EditExtras } from "@water-run/core/schemas";
 import { audienceFromTags } from "@water-run/core/audience";
 import { dispenserFromTags } from "@water-run/core/dispenser";
@@ -19,18 +17,26 @@ const QUICK_TAGS = [
   "Bottle filler not running",
 ];
 
+// The color of a filled button's label and icon. Light (white) on the
+// saturated fills; dark on a light fill such as amber, where white falls
+// under 3:1 contrast.
+export type Ink = "light" | "dark";
+export const INK: Record<Ink, { text: string; hex: string }> = {
+  light: { text: "text-white", hex: "#ffffff" },
+  dark: { text: "text-base", hex: "#0c0d0a" },
+};
+
 type Props = {
   tags: Record<string, string>;
   submitLabel: string;
   SubmitIcon?: typeof CheckCircleIcon;
   submitBox?: string;
-  onSubmit: (extras?: EditExtras, action?: "out_of_order" | "broken") => void;
+  submitInk?: Ink;
+  onSubmit: (extras?: EditExtras) => void;
   onCancel?: () => void;
   isRemoved?: boolean;
   isOutOfOrder?: boolean;
   isBroken?: boolean;
-  /** Merged "Something's wrong" flow — user picks out_of_order vs broken in-form. */
-  isProblem?: boolean;
 };
 
 export function PointDetailsForm({
@@ -38,26 +44,13 @@ export function PointDetailsForm({
   submitLabel,
   SubmitIcon = CheckCircleIcon,
   submitBox = "bg-green-600",
+  submitInk = "light",
   onSubmit,
   onCancel,
   isRemoved = false,
   isOutOfOrder = false,
   isBroken = false,
-  isProblem = false,
 }: Props) {
-  // In the merged "Something's wrong" flow, the user chooses the specific problem
-  // here; that choice — not the caller — drives which fields show and which action fires.
-  const [problemType, setProblemType] = useState<"out_of_order" | "broken">("out_of_order");
-  const outOfOrder = isProblem ? problemType === "out_of_order" : isOutOfOrder;
-  const broken = isProblem ? problemType === "broken" : isBroken;
-
-  const effLabel = isProblem
-    ? outOfOrder
-      ? "Mark out of order"
-      : "Mark working but broken"
-    : submitLabel;
-  const EffIcon = isProblem ? (outOfOrder ? WarningIcon : WrenchIcon) : SubmitIcon;
-  const effBox = isProblem ? (outOfOrder ? "bg-orange-600" : "bg-amber-500") : submitBox;
   // Derive initial values from tags — recalculated when `tags` identity changes.
   const defaults = useMemo(
     () => ({
@@ -102,51 +95,17 @@ export function PointDetailsForm({
       return;
     }
     const extras: EditExtras = { audience, dispenser };
-    if (seasonal && !outOfOrder) extras.seasonal = true;
+    if (seasonal && !isOutOfOrder) extras.seasonal = true;
     if (cleaned) extras.note = cleaned;
-    onSubmit(extras, isProblem ? problemType : undefined);
+    onSubmit(extras);
   }
 
   return (
     <View className="gap-3.5">
-      {isProblem ? (
-        <View className="gap-1.5">
-          <Text className="text-base text-xs font-bold tracking-wider uppercase">
-            What&apos;s the issue?
-          </Text>
-          <View className="flex-row gap-3">
-            {(
-              [
-                ["out_of_order", "Out of order", WarningIcon],
-                ["broken", "Working but broken", WrenchIcon],
-              ] as const
-            ).map(([value, label, Icon]) => {
-              const active = problemType === value;
-              return (
-                <Pressable
-                  key={value}
-                  onPress={() => setProblemType(value)}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: active }}
-                  className={`flex-1 flex-row items-center justify-center gap-1.5 rounded-xl border px-3 py-3 ${
-                    active ? "border-orange-600 bg-orange-50" : "border-border bg-surface-deep"
-                  }`}
-                >
-                  <Icon size={18} color={active ? "#ea580c" : "#57544a"} weight="bold" />
-                  <Text className={`text-xs font-bold ${active ? "text-orange-600" : "text-base"}`}>
-                    {label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-      ) : null}
-
       {isRemoved ? (
         <View className="rounded-xl border border-red-300 bg-red-100 p-4">
           <Text className="text-sm font-bold text-red-950">
-            Confirm marking this fountain as removed.
+            Confirm there&apos;s no fountain here.
           </Text>
         </View>
       ) : (
@@ -155,7 +114,7 @@ export function PointDetailsForm({
           <DispenserToggle value={dispenser} onChange={setDispenser} />
 
           {/* Seasonal checkbox hidden on out of order page */}
-          {!outOfOrder ? (
+          {!isOutOfOrder ? (
             <Pressable
               onPress={() => setSeasonal((s) => !s)}
               accessibilityRole="checkbox"
@@ -190,8 +149,8 @@ export function PointDetailsForm({
         </>
       )}
 
-      {/* "Working but broken" issue details + quick tag pills */}
-      {broken ? (
+      {/* "Partially working" issue details + quick tag pills */}
+      {isBroken ? (
         <View className="gap-2 pt-1">
           <Text className="text-base text-xs font-bold tracking-wider uppercase">
             What&apos;s wrong with the fountain?
@@ -226,12 +185,12 @@ export function PointDetailsForm({
 
       <View className="gap-1.5">
         <Text className="text-base text-xs font-bold tracking-wider uppercase">
-          {broken ? "Details / Note" : "Public Note"}
+          {isBroken ? "Details / Note" : "Public Note"}
         </Text>
         <TextField
           value={note}
           onChangeText={editNote}
-          placeholder={broken ? "Describe what's wrong…" : "Add a public note (optional)"}
+          placeholder={isBroken ? "Describe what's wrong…" : "Add a public note (optional)"}
           placeholderTextColor="#57544a"
           multiline
           maxLength={NOTE_MAX}
@@ -254,10 +213,10 @@ export function PointDetailsForm({
         <Pressable
           onPress={handleSubmit}
           accessibilityRole="button"
-          className={`flex-1 flex-row items-center justify-center gap-2 rounded-xl px-4 py-3 ${effBox}`}
+          className={`flex-1 flex-row items-center justify-center gap-2 rounded-xl px-4 py-3 ${submitBox}`}
         >
-          <EffIcon size={18} color="#ffffff" weight="bold" />
-          <Text className="text-base font-bold text-white">{effLabel}</Text>
+          <SubmitIcon size={18} color={INK[submitInk].hex} weight="bold" />
+          <Text className={`text-base font-bold ${INK[submitInk].text}`}>{submitLabel}</Text>
         </Pressable>
       </View>
     </View>
