@@ -1,10 +1,5 @@
 import * as SecureStore from "expo-secure-store";
-import {
-  forgetStoredToken,
-  readStoredToken,
-  tokenKeyFor,
-  type SecretStore,
-} from "@rosm/core/nativeAuth";
+import { tokenKeyFor } from "@rosm/core/nativeAuth";
 import { API_BASE } from "../ports/api";
 
 // The OSM bearer token, cached in memory (read synchronously by the api port) and
@@ -19,11 +14,6 @@ const host = (() => {
   }
 })();
 const KEY = tokenKeyFor(host);
-const keychain: SecretStore = {
-  get: (key) => SecureStore.getItemAsync(key),
-  set: (key, value) => SecureStore.setItemAsync(key, value),
-  remove: (key) => SecureStore.deleteItemAsync(key),
-};
 const holder: { token: string | null } = { token: null };
 const listeners = new Set<() => void>();
 
@@ -42,15 +32,13 @@ export const onAuthChange = (fn: () => void): (() => void) => {
   };
 };
 
-// Read the stored token into memory, carrying it over from the entry older
-// builds kept it under (see readStoredToken). Rejects when the keychain can't
-// be read (iOS refuses while the phone is locked, as on a background launch;
+// Read the stored token into memory. Rejects when the keychain can't be read (iOS refuses while the phone is locked, as on a background launch;
 // Android when the keystore can't decrypt the entry): nothing changes then,
 // and the caller may read again later. Listeners hear about it either way.
 export async function loadToken(): Promise<void> {
   const at = generation;
   try {
-    const token = await readStoredToken(keychain, host);
+    const token = await SecureStore.getItemAsync(KEY);
     if (at === generation) holder.token = token;
   } finally {
     emit();
@@ -63,7 +51,7 @@ export async function storeToken(token: string): Promise<void> {
   generation++;
   holder.token = token;
   try {
-    await keychain.set(KEY, token);
+    await SecureStore.setItemAsync(KEY, token);
   } catch (e) {
     console.warn("[auth] couldn't save the token", e);
   } finally {
@@ -78,7 +66,7 @@ export async function clearToken(): Promise<void> {
   generation++;
   holder.token = null;
   try {
-    await forgetStoredToken(keychain, host);
+    await SecureStore.deleteItemAsync(KEY);
   } catch (e) {
     console.warn("[auth] couldn't delete the token", e);
   } finally {
