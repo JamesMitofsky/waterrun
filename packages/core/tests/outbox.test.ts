@@ -138,6 +138,39 @@ describe("flush", () => {
     expect(sentBody(1).changesetId).toBe(42); // reuses the opened changeset
   });
 
+  it("counts an edit the node already carried as sent, without claiming its version", async () => {
+    // The first send of a session timed out after OSM had taken it. The resend
+    // finds the node already says so, writes nothing, and has no changeset to
+    // report since none was open.
+    apiFetchMock.mockImplementation(async () =>
+      ok({ nodeId: 1, action: "confirm", newVersion: 7, unchanged: true }),
+    );
+    enqueueReady();
+    await useOutbox.getState().flush();
+
+    expect(apiFetchMock).toHaveBeenCalledTimes(1);
+    expect(only().syncState).toBe("sent");
+    expect(only().error).toBeUndefined();
+    // The node's current version may be someone else's: nothing for undo to revert.
+    expect(only().newVersion).toBeUndefined();
+    expect(only().changesetId).toBeUndefined();
+    expect(storage.setMeta).not.toHaveBeenCalled();
+  });
+
+  it("keeps the open changeset when an edit that wrote nothing reports none", async () => {
+    useOutbox.getState().setChangeset(42);
+    apiFetchMock
+      .mockResolvedValueOnce(ok({ newVersion: 7, unchanged: true }))
+      .mockImplementation(async () => ok({ changesetId: 42, newVersion: 3, changesetUrl: "u" }));
+    enqueueReady(1);
+    enqueueReady(2);
+    await useOutbox.getState().flush();
+
+    expect(useOutbox.getState().items.map((i) => i.syncState)).toEqual(["sent", "sent"]);
+    expect(useOutbox.getState().changesetId).toBe(42);
+    expect(sentBody(1).changesetId).toBe(42);
+  });
+
   it("bounds every send with a request timeout", async () => {
     apiFetchMock.mockImplementation(async () => accepted());
     enqueueReady();
@@ -307,7 +340,7 @@ describe("failure handling", () => {
   it.each([
     ["a 200 page that isn't ours", html(200), "Couldn't reach the server"],
     ["a platform error page", html(504), "Edit failed (HTTP 504)"],
-    ["a 2xx without our body", ok({}), "Unexpected reply from the server"],
+    ["a 2xx JSON reply that isn't an edit result", ok({}), "Unexpected reply from the server"],
   ])("backs off after %s", async (_label, reply, error) => {
     apiFetchMock.mockResolvedValueOnce(reply);
     enqueueReady();

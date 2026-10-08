@@ -60,12 +60,21 @@ export type OutboxItem = {
   error?: string; // why the last send failed (on a pending item: why it waits)
   // Filled once OSM accepts the edit:
   changesetId?: number;
-  newVersion?: number;
+  newVersion?: number; // the version our write made; absent if nothing needed writing
   changesetUrl?: string;
 };
 
-// The part of a successful /api/osm/edit reply the outbox keeps.
-type EditReply = { changesetId?: number; newVersion?: number; changesetUrl?: string };
+// The part of a successful /api/osm/edit reply the outbox keeps. `unchanged`
+// means the node already said exactly what the edit would write, so nothing was
+// written: usually a resend of an edit whose reply was lost. newVersion is then
+// the node's current version, which may not be ours, and changesetId is absent
+// if we had none open.
+type EditReply = {
+  changesetId?: number;
+  newVersion?: number;
+  changesetUrl?: string;
+  unchanged?: boolean;
+};
 
 const CHANGESET_META = "changesetId";
 
@@ -207,15 +216,18 @@ export const useOutbox = create<OutboxState>((set, get, store) => {
       return;
     }
 
-    if (reply.ok && typeof reply.data?.changesetId === "number") {
-      const { changesetId, newVersion, changesetUrl } = reply.data;
-      get().setChangeset(changesetId);
+    // Every success carries newVersion, an unchanged one included.
+    if (reply.ok && typeof reply.data?.newVersion === "number") {
+      const { changesetId, changesetUrl, newVersion, unchanged } = reply.data;
+      // An edit that wrote nothing may come back without a changeset; the one
+      // we hold stays open for the next edit.
+      if (typeof changesetId === "number") get().setChangeset(changesetId);
       persist({
         ...sending,
         syncState: "sent",
         changesetId,
-        newVersion,
         changesetUrl,
+        newVersion: unchanged ? undefined : newVersion,
         error: undefined,
         nextAttemptAt: undefined,
       });
