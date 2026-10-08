@@ -49,17 +49,27 @@ export const api: ApiPort = {
     const headers = new Headers(init.headers);
     const token = getToken();
     if (token && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`);
-    if (!timeoutMs) return fetch(apiUrl(path), { ...init, headers });
+    if (!timeoutMs) {
+      try {
+        return await fetch(apiUrl(path), { ...init, headers });
+      } catch (e) {
+        throw asWebFetchError(e, init.signal);
+      }
+    }
 
     // Same contract as the site's apiFetch: abort on expiry and reject with
-    // ApiTimeoutError, while still honoring a caller-supplied signal.
+    // ApiTimeoutError, while still honoring a caller-supplied signal. The timer
+    // is left running once the headers arrive, so the deadline covers the whole
+    // exchange: a body that stalls mid-stream is aborted too, and reading it then
+    // rejects like any other lost reply. Aborting a finished request is a no-op.
     const ctrl = new AbortController();
     let timedOut = false;
+    const onCallerAbort = () => ctrl.abort();
     const timer = setTimeout(() => {
       timedOut = true;
       ctrl.abort();
+      init.signal?.removeEventListener("abort", onCallerAbort);
     }, timeoutMs);
-    const onCallerAbort = () => ctrl.abort();
     if (init.signal) {
       if (init.signal.aborted) ctrl.abort();
       else init.signal.addEventListener("abort", onCallerAbort, { once: true });
@@ -67,11 +77,24 @@ export const api: ApiPort = {
     try {
       return await fetch(apiUrl(path), { ...init, headers, signal: ctrl.signal });
     } catch (e) {
-      if (timedOut) throw new ApiTimeoutError(timeoutMs);
-      throw e;
-    } finally {
       clearTimeout(timer);
       init.signal?.removeEventListener("abort", onCallerAbort);
+      if (timedOut) throw new ApiTimeoutError(timeoutMs);
+      throw asWebFetchError(e, init.signal);
     }
   },
 };
+
+// The app's global fetch is expo/fetch, which rejects every failure (no network,
+// reset connection, even an abort) with its own FetchError, a plain Error. Core
+// decides "no reply, try again later" by the web fetch contract (a TypeError for
+// network failures, an AbortError for aborts; see isTransportError), so translate
+// here at the port and keep the original as the cause.
+function asWebFetchError(e: unknown, callerSignal?: AbortSignal | null): Error {
+  if (e instanceof TypeError) return e;
+  const message = e instanceof Error ? e.message : String(e);
+  const err = callerSignal?.aborted ? new Error(message) : new TypeError(message);
+  if (callerSignal?.aborted) err.name = "AbortError";
+  (err as Error & { cause?: unknown }).cause = e;
+  return err;
+}
