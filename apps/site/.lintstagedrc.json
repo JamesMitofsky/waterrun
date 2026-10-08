@@ -1,4 +1,4 @@
 {
-  "*.{js,mjs,cjs,ts,mts,svelte,astro}": ["eslint --fix", "prettier --write"],
+  "*.{js,mjs,cjs,ts,mts,svelte,astro}": ["pnpm exec eslint --fix", "prettier --write"],
   "!(*.{js,mjs,cjs,ts,mts,svelte,astro})": "prettier --write --ignore-unknown"
 }
