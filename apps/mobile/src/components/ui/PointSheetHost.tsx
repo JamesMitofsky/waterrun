@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  Dimensions,
   Keyboard,
   Platform,
   Pressable,
   ScrollView,
   useWindowDimensions,
   View,
+  type KeyboardEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from "react-native";
@@ -16,7 +16,7 @@ import { FieldFocusContext, type FieldFocusListener } from "./fieldFocus";
 
 // Height the native sheet keeps for itself above our content: on iOS the gap a
 // full-height sheet leaves under the status bar plus @expo/ui's 16pt top
-// padding, on Android M3's 48dp drag handle. Rounded up on purpose: a spare
+// padding, on Android M3's drag handle (~48dp). Rounded up on purpose: a spare
 // point only makes the content scroll a little sooner, a missing one clips it.
 const SHEET_CHROME = Platform.OS === "ios" ? 44 : 56;
 
@@ -27,25 +27,31 @@ const MIN_SCROLL_HEIGHT = 160;
 function useKeyboardHeight(): number {
   const [height, setHeight] = useState(0);
   useEffect(() => {
-    if (Platform.OS === "ios") {
-      // iOS posts keyboard notifications app-wide, so this reaches us even
-      // though the field sits in a separately presented sheet, and "will"
-      // arrives in time to resize alongside the keyboard. The keyboard runs to
-      // the screen edge, so measure it from the bottom of the window.
-      const sub = Keyboard.addListener("keyboardWillChangeFrame", (e) =>
-        setHeight(Math.max(0, Dimensions.get("window").height - e.endCoordinates.screenY)),
-      );
-      return () => sub.remove();
-    }
+    const show = (e: KeyboardEvent) => setHeight(e.endCoordinates.height);
+    const hide = () => setHeight(0);
+    // iOS posts keyboard notifications app-wide, so they reach us even though
+    // the field sits in a separately presented sheet, and "will" arrives in
+    // time to resize alongside the keyboard ("did" re-reads the settled frame;
+    // iOS re-posts show events when the keyboard changes height). Heights, not
+    // screenY: with Prefer Cross-Fade Transitions iOS reports screenY 0 (see
+    // KeyboardAvoidingView), which would read as a full-screen keyboard.
+    //
     // Android has no "will" events, and RN derives these from the activity
     // window's insets while the sheet's field belongs to the sheet's own dialog
     // window, so they may never arrive. The height then stays 0: content can
     // sit under the keyboard until Done or Back closes it, and is all
     // reachable after. A guessed height would cut the sheet short instead.
-    const subs = [
-      Keyboard.addListener("keyboardDidShow", (e) => setHeight(e.endCoordinates.height)),
-      Keyboard.addListener("keyboardDidHide", () => setHeight(0)),
-    ];
+    const subs =
+      Platform.OS === "ios"
+        ? [
+            Keyboard.addListener("keyboardWillShow", show),
+            Keyboard.addListener("keyboardDidShow", show),
+            Keyboard.addListener("keyboardWillHide", hide),
+          ]
+        : [
+            Keyboard.addListener("keyboardDidShow", show),
+            Keyboard.addListener("keyboardDidHide", hide),
+          ];
     return () => subs.forEach((s) => s.remove());
   }, []);
   return height;
@@ -67,8 +73,8 @@ type Props = {
 // the keyboard is up) used to be clipped off the bottom, taking the action row
 // with it. So the content scrolls inside a box capped at the height the sheet
 // can actually show, which already leaves out the keyboard; the sheet then
-// hugs that box. KeyboardAvoidingView can't do this: it measures its frame
-// relative to the hosted root, not the screen.
+// hugs that box. KeyboardAvoidingView can't do this: it compares its layout
+// frame, relative to the hosted root, with the keyboard's screen position.
 export function PointSheetHost({ isPresented, onDismiss, children }: Props) {
   // matchContents sizes the host to its child's *intrinsic* size and ignores
   // an explicit width on the host itself. So the explicit width goes on the
