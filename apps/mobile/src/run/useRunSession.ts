@@ -272,6 +272,10 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
     await addAt(pos).catch((e: Error) => setErr(e.message));
   }, [pos, addAt]);
 
+  // The panel's error line, for a failure whose own UI has gone: an add whose
+  // sheet was swiped away while it saved.
+  const reportError = useCallback((message: string) => setErr(message), []);
+
   const endEarly = useCallback(() => {
     setLastSaved(null);
     setManualArrived(false);
@@ -357,6 +361,7 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
     endEarly,
     addHere,
     addAt,
+    reportError,
   };
 }
 

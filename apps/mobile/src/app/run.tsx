@@ -62,6 +62,14 @@ export default function RunScreen() {
 
   const [selectedId, setSelectedId] = useState<number | string | null>(null);
   const [addLocation, setAddLocation] = useState<{ lat: number; lon: number } | null>(null);
+  // The spot whose add sheet is open, kept in step with it as it opens and
+  // closes. An add settles up to its 30 s deadline later, and by then the sheet
+  // may have been swiped away or opened again at another spot.
+  const openAdd = useRef<{ lat: number; lon: number } | null>(null);
+  const showAdd = (at: { lat: number; lon: number } | null) => {
+    openAdd.current = at;
+    setAddLocation(at);
+  };
   const [confirm, setConfirm] = useState<{ i: number; action: "end" } | null>(null);
   const [now, setNow] = useState(() => new Date());
 
@@ -100,7 +108,7 @@ export default function RunScreen() {
   };
 
   const onMapPress = (lat: number, lon: number) => {
-    setAddLocation({ lat, lon });
+    showAdd({ lat, lon });
   };
 
   const selectedPoint = useMemo(() => {
@@ -329,7 +337,7 @@ export default function RunScreen() {
         ) : null}
       </PointSheetHost>
 
-      <PointSheetHost isPresented={addLocation != null} onDismiss={() => setAddLocation(null)}>
+      <PointSheetHost isPresented={addLocation != null} onDismiss={() => showAdd(null)}>
         {addLocation ? (
           <PointSheet
             fountain={{
@@ -340,9 +348,19 @@ export default function RunScreen() {
             }}
             // The sheet, and what was typed into it, stays until the point
             // exists: a failed add shows its reason there for another try.
+            // Once the sheet has been swiped away (it can be, mid-save) the
+            // reason goes to the run panel instead, and a late success leaves
+            // alone a sheet since opened at another spot.
             onAction={async (_action, extras) => {
-              await s.addAt(addLocation, extras);
-              setAddLocation(null);
+              try {
+                await s.addAt(addLocation, extras);
+              } catch (e) {
+                if (openAdd.current !== addLocation) {
+                  s.reportError(`Point not added. ${e instanceof Error ? e.message : String(e)}`);
+                }
+                throw e;
+              }
+              if (openAdd.current === addLocation) showAdd(null);
             }}
           />
         ) : null}
