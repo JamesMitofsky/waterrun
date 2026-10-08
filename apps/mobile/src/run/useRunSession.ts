@@ -9,6 +9,7 @@ import { archiveRoute, getArchivedRoutes } from "@rosm/core/routeArchive";
 import type { EditAction, EditExtras, Fountain } from "@rosm/core/schemas";
 import type { SurveyAction } from "../components/PointSheet";
 import { api } from "../ports/api";
+import { getToken } from "../auth/authStore";
 import { useOsmStatus } from "../auth/useOsmStatus";
 import { watchRunPosition } from "../ports/geolocation";
 import type { GeoWatch } from "@rosm/core/ports";
@@ -36,7 +37,7 @@ const SAVED_LABEL: Record<SurveyAction, string> = {
 // but returns markers as plain data (the screen owns the bottom sheet).
 export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
   const run = useRun();
-  const { status: osm, refresh: refreshOsm } = useOsmStatus();
+  const { status: osm } = useOsmStatus();
   const [pos, setPos] = useState<Pt | null>(null);
   const [gpsHeading, setGpsHeading] = useState<number | null>(null);
   const [manualArrived, setManualArrived] = useState(false);
@@ -217,7 +218,9 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
   // Create a brand-new node of the surveyed type at a given spot (GPS position or tapped map location).
   const addAt = useCallback(
     async (at: { lat: number; lon: number }, extras?: EditExtras) => {
-      if (!osm?.loggedIn) {
+      // The token is the sign-in: the status endpoint can't tell signed out
+      // from offline.
+      if (!getToken()) {
         setErr("Sign in to OSM first.");
         return;
       }
@@ -250,20 +253,16 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
         setAdding(false);
       }
     },
-    [osm, tagKey, tagValue, run, index, persist],
+    [tagKey, tagValue, run, index, persist],
   );
 
   const addHere = useCallback(async () => {
-    if (!osm?.loggedIn) {
-      setErr("Sign in to OSM first.");
-      return;
-    }
     if (!pos) {
       setErr("Waiting for GPS fix.");
       return;
     }
     await addAt(pos);
-  }, [osm, pos, addAt]);
+  }, [pos, addAt]);
 
   // Close the OSM changeset and mark the run done. Returns true on success so
   // the screen can navigate to the run summary only when the run really ended.
@@ -385,7 +384,6 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
     added,
     pool,
     osm,
-    refreshOsm,
     adding,
     err,
     lastSaved,
