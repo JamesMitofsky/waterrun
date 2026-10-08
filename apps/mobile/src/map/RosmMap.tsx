@@ -3,7 +3,9 @@ import { Pressable, StyleSheet, type ViewStyle, type NativeSyntheticEvent } from
 import {
   Camera,
   type CameraRef,
+  type CameraStop,
   GeoJSONSource,
+  type InitialViewState,
   Layer,
   Map,
   NativeUserLocation,
@@ -14,6 +16,9 @@ import { OSM_STYLE_JSON } from "./style";
 
 // Layer id for the marker dots.
 const MARKER_LAYER = "marker-dots";
+
+// How long the camera takes to ease to a new center.
+const RECENTER_MS = 600;
 
 // Marker data only — screens attach their own action UI on press (Leaflet-style
 // popups can't ride through GeoJSON). Mirrors the web MapView marker shape.
@@ -31,7 +36,8 @@ export type RosmMarker = {
 type PressEvent = { lngLat: [number, number]; point: [number, number] };
 // Source-level press payload: the features hit under the touch, native-side.
 type MarkerPressEvent = { features: Feature[] };
-// MapLibre onRegionDidChange payload (subset we use). bounds is [w, s, e, n].
+// MapLibre onRegionWillChange/onRegionDidChange payload (subset we use).
+// bounds is [w, s, e, n].
 type RegionEvent = {
   center: [number, number]; // [lon, lat]
   zoom: number;
@@ -63,7 +69,10 @@ type Props = {
   // Position the camera once, then leave it under the user's finger. Without this
   // the controlled center/zoom re-applies on every render and snaps panning back.
   initialOnly?: boolean;
+  // With initialOnly: each new key moves the camera to the current
+  // `center`/`zoom`.
   recenterKey?: string;
+  animateRecenter?: boolean;
   fitPoints?: [number, number][]; // [lat, lon][]
   showLocationButton?: boolean;
   style?: ViewStyle;
@@ -162,12 +171,65 @@ export function RosmMap({
   onRegionChange,
   initialOnly,
   recenterKey,
+  animateRecenter,
   showLocationButton,
   fitPoints,
   style,
 }: Props) {
   const cameraRef = useRef<CameraRef>(null);
   const view = resolveView(center, zoom, fitPoints);
+  const [viewLon, viewLat] = view.center;
+  const viewZoom = view.zoom;
+
+  // Where the map opens. The native camera only exists once the map has first
+  // laid out (Map renders it from its onLayout), takes its initial view from
+  // its first props and ignores later ones, so this can follow the latest view.
+  const initialViewState = useMemo<InitialViewState>(
+    () => ({ center: [viewLon, viewLat], zoom: viewZoom }),
+    [viewLon, viewLat, viewZoom],
+  );
+
+  // A camera move made before the map has loaded can be lost. There is no
+  // native camera until the map's first layout; Android then drops moves until
+  // the style has loaded and the camera is attached, and iOS applies the
+  // initial view on its first layout, over any move made before it. So the
+  // latest such move is kept and replayed once the map reports it has loaded
+  // (or failed to), unless the user has moved the map meanwhile.
+  const ready = useRef(false);
+  const pending = useRef<CameraStop | null>(null);
+  const touched = useRef(false);
+
+  const move = useCallback((stop: CameraStop) => {
+    if (!ready.current) pending.current = stop;
+    try {
+      cameraRef.current?.setStop(stop).catch(() => {});
+    } catch {
+      // No native camera yet; the replay covers it.
+    }
+  }, []);
+
+  const onLoaded = useCallback(() => {
+    if (ready.current) return;
+    ready.current = true;
+    const stop = pending.current;
+    pending.current = null;
+    if (stop && !touched.current) move({ ...stop, duration: 0, easing: undefined });
+  }, [move]);
+
+  // Recenter on each new key. The key the map opened with is already where
+  // its initial view put it.
+  const appliedRecenter = useRef(recenterKey);
+  useEffect(() => {
+    if (!initialOnly || recenterKey === undefined || recenterKey === appliedRecenter.current) {
+      return;
+    }
+    appliedRecenter.current = recenterKey;
+    move(
+      animateRecenter
+        ? { center: [viewLon, viewLat], zoom: viewZoom, duration: RECENTER_MS, easing: "ease" }
+        : { center: [viewLon, viewLat], zoom: viewZoom, duration: 0, easing: undefined },
+    );
+  }, [initialOnly, recenterKey, animateRecenter, viewLon, viewLat, viewZoom, move]);
 
   // Serialized here, once per data change. GeoJSONSource stringifies an
   // object on every render it gets, and this map renders on every GPS fix and
@@ -203,6 +265,12 @@ export function RosmMap({
     callbacks.current.onMapPress?.(tapLat, tapLon);
   }, []);
 
+  // The user has moved the map: a move from before the map loaded is no
+  // longer worth replaying over theirs.
+  const onRegionStart = useCallback((e: NativeSyntheticEvent<RegionEvent>) => {
+    if (e.nativeEvent.userInteraction) touched.current = true;
+  }, []);
+
   const onRegion = useCallback((e: NativeSyntheticEvent<RegionEvent>) => {
     const { center: c, zoom: z, bounds, userInteraction } = e.nativeEvent;
     // Ignore camera-driven settles so a recenter doesn't masquerade as a search.
@@ -220,14 +288,13 @@ export function RosmMap({
         compass // native compass button; shows when bearing != 0, tap resets to north
         compassHiddenFacingNorth // hide it once already north-up
         onPress={onMapPress ? onMapTap : undefined}
+        onRegionWillChange={onRegionStart}
         onRegionDidChange={onRegionChange ? onRegion : undefined}
+        onDidFinishLoadingMap={onLoaded}
+        onDidFailLoadingMap={onLoaded}
       >
         {initialOnly ? (
-          <Camera
-            ref={cameraRef}
-            key={recenterKey}
-            initialViewState={{ center: view.center, zoom: view.zoom }}
-          />
+          <Camera ref={cameraRef} initialViewState={initialViewState} />
         ) : (
           <Camera ref={cameraRef} center={view.center} zoom={view.zoom} />
         )}

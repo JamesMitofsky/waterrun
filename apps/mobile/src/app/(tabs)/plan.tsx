@@ -33,6 +33,7 @@ export default function Plan() {
   const phase = usePlanner((s) => s.phase);
   const center = usePlanner((s) => s.center);
   const recenterKey = usePlanner((s) => s.recenterKey);
+  const animateRecenter = usePlanner((s) => s.animateRecenter);
   const line = usePlanner((s) => s.line);
   const tag = usePlanner((s) => s.tag);
   const fountains = usePlanner((s) => s.fountains);
@@ -158,6 +159,7 @@ export default function Plan() {
         showUserLocation={center !== null}
         initialOnly
         recenterKey={recenterKey}
+        animateRecenter={animateRecenter}
         onMapPress={onMapPress}
         onMarkerPress={onMarkerPress}
       />
