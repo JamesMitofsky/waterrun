@@ -311,10 +311,20 @@ describe("nearestCumDistOnPath", () => {
       expect(d).toBeCloseTo(0.001 * M_PER_LON, 0);
     });
 
-    it("keeps a nearby fix inside the window", () => {
-      // The fix projects 40 m past the window's end, which is still on route.
+    it("keeps a nearby fix inside the window's slack", () => {
+      // The fix projects 40 m past the window's end: off the stretch itself,
+      // but within its 30 m slack plus GPS error, so it is placed at the end of
+      // the slack rather than anywhere else on the route.
       const end = 0.001 * M_PER_LON - 40;
-      expect(nearestCumDistOnPath(outAndBack, onTheWayBack, [0, end])).toBeCloseTo(end, 6);
+      expect(nearestCumDistOnPath(outAndBack, onTheWayBack, [0, end])).toBeCloseTo(end + 30, 6);
+    });
+
+    it("prefers the stretch itself over its slack", () => {
+      // On the way back, 10 m past the turnaround: the way out 10 m before it is
+      // as near, and inside the slack of a window that starts at the turnaround.
+      const justBack = { lat: 0, lon: 0.003 - 10 / M_PER_LON };
+      const d = nearestCumDistOnPath(outAndBack, justBack, [turnaround, Infinity]);
+      expect(d).toBeCloseTo(turnaround + 10, 0);
     });
   });
 });

@@ -171,7 +171,13 @@ function projectOnPath(
   return { alongM: bestAlong, offM: best };
 }
 
-// A fix farther than this from the whole windowed stretch is off the route (a
+// A fix this close to the windowed stretch is on it (GPS error included).
+const ON_WINDOW_M = 20;
+// Slack around the window for a fix that isn't on it. A stop is recorded from
+// up to 30 m away (the arrival radius), so a runner can still be that far short
+// of the previous stop when the next target becomes active.
+const WINDOW_SLACK_M = 30;
+// A fix farther than this from even the slackened stretch is off the route (a
 // detour, or a stop skipped from afar), so the window no longer says where the
 // runner is and the whole route is searched instead.
 const WINDOW_OFF_ROUTE_M = 60;
@@ -184,7 +190,10 @@ const WINDOW_OFF_ROUTE_M = 60;
 // fountain) both passes are equally near and the first one wins, so a runner on
 // the way back reads as still on the way out. `window` ([minM, maxM] along the
 // path) limits the search to the stretch the runner should be on; see
-// guidanceWindow in ./guidance.
+// guidanceWindow in ./guidance. The stretch itself is searched first, and its
+// slack only when the fix isn't on it: on a dead-end spur the way in, just
+// before the stop, is as near as the way out, and must not win for the first
+// steps back out.
 export function nearestCumDistOnPath(
   coords: [number, number][],
   p: Pt,
@@ -192,7 +201,10 @@ export function nearestCumDistOnPath(
 ): number {
   if (coords.length < 2) return 0;
   if (window) {
-    const near = projectOnPath(coords, p, window[0], window[1]);
+    const [minM, maxM] = window;
+    const on = projectOnPath(coords, p, minM, maxM);
+    if (on.offM <= ON_WINDOW_M) return on.alongM;
+    const near = projectOnPath(coords, p, minM - WINDOW_SLACK_M, maxM + WINDOW_SLACK_M);
     if (near.offM <= WINDOW_OFF_ROUTE_M) return near.alongM;
   }
   return projectOnPath(coords, p).alongM;

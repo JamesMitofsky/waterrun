@@ -77,6 +77,32 @@ describe("runGuidance on a retraced street", () => {
     expect(g.distToTurn).toBeCloseTo(1.5 * M, 0);
   });
 
+  it("reads the first steps back out of the spur as the way out", () => {
+    // Just past A on the way out, the way in (just before A) is exactly as near;
+    // the stretch from A to B is searched first, so the way out wins.
+    for (const back of [5, 10, 15, 25]) {
+      const justOut = { lat: 0.003 - back / 111320, lon: 0.002 };
+      const g = runGuidance(justOut, B, route, turns, guidanceWindow(route, stops, 1));
+      expect(g.traveledM).toBeCloseTo(along.A + back, 0);
+      expect(g.nextTurn?.distM).toBe(along.spurExit);
+    }
+  });
+
+  it("still finds a runner a little short of the stop they just recorded", () => {
+    // A stop is recorded from up to the arrival radius away. Short of A on the
+    // way in with B already the target, the fix is off the A→B stretch by more
+    // than GPS error, so the slack before A places it.
+    const shortOfA = { lat: 0.003 - (ARRIVAL_RADIUS_M - 2) / 111320, lon: 0.002 };
+    const straight: [number, number][] = [
+      [0, 0],
+      [0.002, 0],
+      [0.002, 0.003],
+      [0.002, 0.006],
+    ];
+    const g = runGuidance(shortOfA, B, straight, [], guidanceWindow(straight, [A, B], 1));
+    expect(g.traveledM).toBeCloseTo(along.A - (ARRIVAL_RADIUS_M - 2), 0);
+  });
+
   it("still reads the way in as the way in while A is the target", () => {
     const g = runGuidance(onSpur, A, route, turns, guidanceWindow(route, stops, 0));
     expect(g.traveledM).toBeCloseTo(3.5 * M, 0);
@@ -103,13 +129,13 @@ describe("guidanceWindow", () => {
   const atA = 0.003 * 111320;
 
   it("spans from the start to just past the first target", () => {
-    expect(guidanceWindow(route, [A], 0)).toEqual([-Infinity, atA + ARRIVAL_RADIUS_M]);
+    expect(guidanceWindow(route, [A], 0)).toEqual([-Infinity, atA]);
   });
 
   it("runs from the last stop to the end once every stop is done", () => {
     // The way home of a single-pin out-and-back loop.
     const w = guidanceWindow(route, [A], 1);
-    expect(w).toEqual([atA - ARRIVAL_RADIUS_M, Infinity]);
+    expect(w).toEqual([atA, Infinity]);
     const g = runGuidance({ lat: 0, lon: 0.001 }, null, route, [], w);
     expect(g.traveledM).toBeCloseTo(atA + 0.002 * 111320, 0);
   });
@@ -126,9 +152,6 @@ describe("guidanceWindow", () => {
     const again = guidanceWindow(fresh, [{ ...A }], 0);
     expect(again).toEqual(first);
     // A moved stop is re-projected.
-    expect(guidanceWindow(fresh, [{ lat: 0, lon: 0.002 }], 0)?.[1]).toBeCloseTo(
-      0.002 * 111320 + ARRIVAL_RADIUS_M,
-      6,
-    );
+    expect(guidanceWindow(fresh, [{ lat: 0, lon: 0.002 }], 0)?.[1]).toBeCloseTo(0.002 * 111320, 6);
   });
 });

@@ -14,11 +14,6 @@ export const PROXIMITY_RADIUS_M = 80;
 // HUD advances to the next maneuver a few meters before reaching it.
 const TURN_LOOKAHEAD_M = 5;
 
-// Slack around the stops that bound a guidance window. A stop is recorded from
-// up to ARRIVAL_RADIUS_M away, so the runner can still be that far short of it
-// when the next target becomes active.
-const WINDOW_MARGIN_M = ARRIVAL_RADIUS_M;
-
 export type RunGuidance = {
   distToTarget: number | null;
   bearingTo: number;
@@ -52,9 +47,9 @@ function stopsAlong(routeCoords: [number, number][], stops: readonly Pt[]): numb
 }
 
 // The stretch of the route ([minM, maxM] along it) a runner heading for
-// stops[index] should be on: from just before the previous stop (or the start)
-// to just past the target, or from the last stop to the end once every stop is
-// done. Passing it to runGuidance keeps a fix on a retraced street (a dead-end
+// stops[index] should be on: from the previous stop (or the start) to the
+// target, or from the last stop to the end once every stop is done (the search
+// allows some slack around it; see nearestCumDistOnPath). Passing it to runGuidance keeps a fix on a retraced street (a dead-end
 // spur to a fountain, the way back of an out-and-back loop) from snapping onto
 // the earlier pass and announcing the turns already taken. It depends only on
 // the route and the stop index, so it survives a cold start.
@@ -66,8 +61,8 @@ export function guidanceWindow(
   if (routeCoords.length < 2 || stops.length === 0) return undefined;
   const along = stopsAlong(routeCoords, stops);
   const prev = Math.min(index, along.length) - 1;
-  const minM = prev >= 0 ? along[prev] - WINDOW_MARGIN_M : -Infinity;
-  const maxM = index < along.length ? along[Math.max(0, index)] + WINDOW_MARGIN_M : Infinity;
+  const minM = prev >= 0 ? along[prev] : -Infinity;
+  const maxM = index < along.length ? along[Math.max(0, index)] : Infinity;
   return [minM, maxM];
 }
 
