@@ -1,14 +1,16 @@
 import * as WebBrowser from "expo-web-browser";
 import * as Linking from "expo-linking";
-import cfg from "@rosm/core/appConfig.json";
+import cfg from "@water-run/core/appConfig.json";
+import { NATIVE_AUTH_CALLBACK } from "@water-run/core/nativeAuth";
 import { apiUrl } from "../ports/api";
 import { storeToken, clearToken } from "./authStore";
 
 // The whole OAuth dance (PKCE, state, token exchange against OSM) runs server-side,
 // exactly as it did for the Capacitor build. We open the server's ?native=1 entry
-// in an ASWebAuthenticationSession; the server redirects to rosm://osm-callback?token=…
-// and openAuthSessionAsync hands that URL straight back.
-const CALLBACK = `${cfg.scheme}://osm-callback`;
+// in an ASWebAuthenticationSession; the server redirects to waterrun://osm-callback?token=…
+// and openAuthSessionAsync hands that URL straight back. The router never handles
+// it (see app/+native-intent).
+const CALLBACK = `${cfg.scheme}://${NATIVE_AUTH_CALLBACK}`;
 
 export type SignInResult = { ok: boolean; error?: string };
 

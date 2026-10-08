@@ -1,6 +1,6 @@
 /**
  * What the social card is, in the two places that must agree about it: the
- * route that renders the PNG (`pages/opengraph-image.png.ts`) and the layout
+ * route that renders the JPEG (`pages/opengraph-image.jpg.ts`) and the layout
  * that describes it (`og:image:alt` in `Layout.astro`). Kept apart from
  * `render.ts`: that module reads the logo and the basemap thumbnail at import
  * and pulls in sharp, which the layout has no business paying for.

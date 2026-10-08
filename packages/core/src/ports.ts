@@ -1,6 +1,6 @@
 // Platform capabilities that each app injects at startup. The stores and other
 // core modules call these through the registry in ./configure.ts, so nothing in
-// @rosm/core reaches for a browser, Capacitor, or Expo API directly.
+// @water-run/core reaches for a browser or Expo API directly.
 //
 // Only the ports the core runtime actually calls live in CorePorts. The rest are
 // contract types each app implements and consumes in its own UI layer, kept here
@@ -18,10 +18,19 @@ export type GeoWatch = { clear: () => void };
 
 // -- Ports the core runtime calls (the injected registry) --------------------
 
+export type ApiFetchOptions = {
+  // Hard ceiling on the whole request. On expiry the request is aborted and the
+  // call rejects with ApiTimeoutError (./apiResponse). Without one, a half-open
+  // connection can hang for many minutes on a phone (Android's OkHttp has no
+  // read timeout by default). Omit to wait indefinitely.
+  timeoutMs?: number;
+};
+
 export type ApiPort = {
-  // Talk to the ROSM backend. Web sends the httpOnly OSM cookie (same origin);
-  // mobile prefixes an absolute base and attaches the OSM bearer token.
-  apiFetch: (path: string, init?: RequestInit) => Promise<Response>;
+  // Talk to the Water Run backend (the Astro /api endpoints). Web sends the
+  // httpOnly OSM cookie (same origin); mobile prefixes an absolute base and
+  // attaches the OSM bearer token.
+  apiFetch: (path: string, init?: RequestInit, opts?: ApiFetchOptions) => Promise<Response>;
 };
 
 // Small synchronous key/value store (route archive + planner draft). localStorage
@@ -29,6 +38,7 @@ export type ApiPort = {
 export type KvPort = {
   get: (key: string) => string | null;
   set: (key: string, value: string) => void;
+  remove: (key: string) => void;
 };
 
 // The offline outbox: one record per queued edit plus a tiny meta kv. IndexedDB

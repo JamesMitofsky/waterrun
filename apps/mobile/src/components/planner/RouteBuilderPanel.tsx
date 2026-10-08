@@ -1,9 +1,9 @@
 import { useMemo } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { ArrowCounterClockwiseIcon } from "phosphor-react-native";
-import { usePlanner, removedOf } from "@rosm/core/stores/planner";
-import type { Fountain } from "@rosm/core/schemas";
-import { fmtDist } from "@rosm/core/geo";
+import { ArrowCounterClockwiseIcon } from "phosphor-react-native/src/icons/ArrowCounterClockwise";
+import { usePlanner, removedOf } from "@water-run/core/stores/planner";
+import type { Fountain } from "@water-run/core/schemas";
+import { fmtDist } from "@water-run/core/geo";
 import { Button } from "../ui/Button";
 import { PhaseNav } from "./PhaseNav";
 
@@ -24,11 +24,22 @@ export function RouteBuilderPanel({ onStartRun }: { onStartRun: () => void }) {
 
   const hasSelectedFountains = p.stops.length > 0 || p.pinnedIds.length > 0;
 
+  // Retry re-runs whatever failed. A route that failed is re-planned from the
+  // current picks; searching again would throw them away.
+  const retry =
+    p.errSource === "route"
+      ? { loading: p.busy === "route", run: () => p.retryRoute() }
+      : { loading: p.busy === "find", run: () => p.findPoints() };
+
   return (
     <View className="gap-3">
+      {/* With no start yet (location denied, or no fix so far), a tap on the
+          map sets one. */}
       <View className="flex-row items-center gap-2">
         <Text className="text-base text-lg font-bold">
-          Tap fountains to add/remove them from your route
+          {p.center
+            ? "Tap fountains to add/remove them from your route"
+            : "Tap the map to set your start"}
         </Text>
       </View>
 
@@ -41,15 +52,20 @@ export function RouteBuilderPanel({ onStartRun }: { onStartRun: () => void }) {
             {removed.map((f) => (
               <View
                 key={f.id}
-                className="bg-surface-deep mb-1 flex-row items-center justify-between rounded-lg px-2 py-1.5"
+                className="bg-surface-deep mb-1 flex-row items-center justify-between rounded-lg py-0.5 pl-2"
               >
                 <Text className="text-muted flex-1 text-xs line-through" numberOfLines={1}>
                   {markLabel(f)}
                 </Text>
+                {/* Neighbouring targets end up 8pt apart, too close for a big
+                    hitSlop, so this one grows with padding (which also supplies
+                    the row's right inset) and takes half that gap as slop. */}
                 <Pressable
                   onPress={() => p.restoreStop(f.id)}
                   accessibilityRole="button"
                   accessibilityLabel="add point back to route"
+                  hitSlop={{ top: 4, bottom: 4 }}
+                  className="px-2 py-2"
                 >
                   <Text className="text-link text-xs font-semibold">Add back</Text>
                 </Pressable>
@@ -93,22 +109,19 @@ export function RouteBuilderPanel({ onStartRun }: { onStartRun: () => void }) {
             </Text>
           ) : null}
           {p.errRetryable ? (
-            <Button
-              title="Retry"
-              variant="secondary"
-              loading={p.busy === "find"}
-              onPress={() => p.findPoints()}
-            />
+            <Button title="Retry" variant="secondary" loading={retry.loading} onPress={retry.run} />
           ) : null}
         </View>
       ) : null}
 
-      {/* Forward starts the run once a route exists. */}
+      {/* Forward starts the run once a route exists, and only from a route
+          that matches the picks: while it is re-planning, or after that
+          failed, the stops and line on hand are the previous route's. */}
       <PhaseNav
         forward={{
           label: "Start run",
           onPress: onStartRun,
-          disabled: !hasSelectedFountains || p.busy !== null,
+          disabled: !hasSelectedFountains || p.busy !== null || p.routeStale,
         }}
       />
     </View>

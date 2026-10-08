@@ -7,9 +7,23 @@
       "env": ["VERCEL_*"],
       "outputs": ["dist/**", ".vercel/output/**", ".astro/**"]
     },
-    "lint": {},
-    "typecheck": {},
-    "test": {},
+    // The apps compile @water-run/core's TypeScript source, so their lint, typecheck
+    // and test results depend on core's files. `transit` has no script: it only
+    // folds every workspace dependency's hash into these tasks' cache keys, so a
+    // core edit re-runs its dependents without serializing them behind core's
+    // own tasks the way "^typecheck" would.
+    "transit": {
+      "dependsOn": ["^transit"]
+    },
+    "lint": {
+      "dependsOn": ["transit"]
+    },
+    "typecheck": {
+      "dependsOn": ["transit"]
+    },
+    "test": {
+      "dependsOn": ["transit"]
+    },
     "dev": {
       "cache": false,
       "persistent": true

@@ -9,6 +9,7 @@ export function makeMemoryKv(): KvPort {
   return {
     get: (k) => (store.has(k) ? (store.get(k) as string) : null),
     set: (k, v) => void store.set(k, v),
+    remove: (k) => void store.delete(k),
   };
 }
 
@@ -24,7 +25,7 @@ export function makeFakeOutboxStorage() {
   };
 }
 
-// Wire fake ports into @rosm/core and hand the spies back to the test.
+// Wire fake ports into @water-run/core and hand the spies back to the test.
 export function configureTestPorts() {
   const apiFetch = vi.fn();
   const getCurrentPosition = vi.fn();

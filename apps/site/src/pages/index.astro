@@ -8,7 +8,7 @@ import Footer from "@/components/Footer.astro";
 // The handwritten headline is one flat ink over a textured alpha, so it ships
 // as an alpha mask (hand-authored, see scripts/build-header-assets.ts) that
 // CSS fills with `hero-ink`. Inlined: it is the LCP element and sits inside
-// the `.reveal` entrance, and as a separate request it landed mid-animation
+// the `.reveal-now` entrance, and as a separate request it landed mid-animation
 // and popped in.
 // Dimensions come from the generated module rather than an image import: a
 // bare import of the WebP makes the image pipeline emit a copy nobody requests.
@@ -189,12 +189,12 @@ const mobileBottomBand = bandPath(mobileBottomWave, "bottom");
           <h1
             role="img"
             aria-label="An accurate map of nearby drinking fountains made by your friendly neighborhood runners"
-            class="hero-mark reveal bg-hero-ink w-full max-w-xl md:max-w-none"
-            style={`transition-delay: 0.1s; --hero-mask: url(${heroMask}); aspect-ratio: ${HERO_MASK_SIZE.width} / ${HERO_MASK_SIZE.height}`}
+            class="hero-mark reveal-now bg-hero-ink w-full max-w-xl md:max-w-none"
+            style={`--reveal-delay: 0.1s; --hero-mask: url(${heroMask}); aspect-ratio: ${HERO_MASK_SIZE.width} / ${HERO_MASK_SIZE.height}`}
           >
           </h1>
 
-          <div class="reveal flex flex-col items-start gap-7" style="transition-delay: 0.16s">
+          <div class="reveal-now flex flex-col items-start gap-7" style="--reveal-delay: 0.16s">
             <!-- Narrow screens set this smaller but heavier: it sits over live map
               now, where a light 1.2rem line thinned out against the tiles. -->
             <p
@@ -316,31 +316,42 @@ const mobileBottomBand = bandPath(mobileBottomWave, "bottom");
     <Footer />
   </main>
 
-  <script>
-    // Scroll-reveal (was framer-motion fadeUp): reveal each `.reveal` block as it
-    // crosses into view, once. Positive bottom rootMargin extends the trigger zone
-    // below the viewport so blocks start revealing while still under the fold.
-    const els = document.querySelectorAll<HTMLElement>(".reveal");
-    const io = new IntersectionObserver(
-      (entries, obs) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            entry.target.classList.add("in-view");
-            obs.unobserve(entry.target);
-            // Free GPU layer once animation is done — will-change is expensive to hold
-            (entry.target as HTMLElement).addEventListener(
+  {
+    /* Scroll-reveal (was framer-motion fadeUp) for the blocks below the hero:
+      each `.reveal` block is revealed once, as it crosses into view. The
+      positive bottom rootMargin extends the trigger zone below the viewport so
+      blocks start revealing while still under the fold, and `will-change` is
+      dropped once the transition ends, since a GPU layer is expensive to hold.
+
+      A classic inline script, not a bundled module: modules wait for the whole
+      document and every module before them, which is how the hero used to sit
+      invisible behind the map's script chain. So it is plain JS (`is:inline`
+      is not compiled), wrapped in a block to keep its bindings out of the
+      global scope, and explained out here rather than inside, because inline
+      script ships byte for byte. */
+  }
+  <script is:inline>
+    {
+      const io = new IntersectionObserver(
+        (entries, obs) => {
+          for (const entry of entries) {
+            if (!entry.isIntersecting) continue;
+            const el = entry.target;
+            el.classList.add("in-view");
+            obs.unobserve(el);
+            el.addEventListener(
               "transitionend",
               () => {
-                (entry.target as HTMLElement).style.willChange = "auto";
+                el.style.willChange = "auto";
               },
               { once: true },
             );
           }
-        }
-      },
-      { rootMargin: "0px 0px 20% 0px", threshold: 0 },
-    );
-    els.forEach((el) => io.observe(el));
+        },
+        { rootMargin: "0px 0px 20% 0px", threshold: 0 },
+      );
+      document.querySelectorAll(".reveal").forEach((el) => io.observe(el));
+    }
   </script>
   <style>
     /* Handwritten headline: a flat fill (`bg-hero-ink`) shown through the ink's

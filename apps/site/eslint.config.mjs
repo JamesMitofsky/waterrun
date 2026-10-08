@@ -38,6 +38,22 @@ export default defineConfig(
         "error",
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
       ],
+      // phosphor-svelte's index re-exports every icon and declares no
+      // `sideEffects`, so the bundler keeps it as one shared module: every icon
+      // any island imports, with all six weights each, lands in a single chunk
+      // that every one of those islands then downloads.
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "phosphor-svelte",
+              message:
+                'Import each icon from its own file, e.g. `import HouseIcon from "phosphor-svelte/lib/HouseIcon"`; the barrel bundles every icon on the site into one chunk.',
+            },
+          ],
+        },
+      ],
     },
   },
   prettier,

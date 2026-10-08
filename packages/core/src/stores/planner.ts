@@ -1,10 +1,11 @@
 import { create } from "zustand";
-import { planRoute } from "../plan";
+import { planRoute, type PlanNode } from "../plan";
 import { milesToMeters, type Pt } from "../geo";
-import type { Turn } from "../brouter";
+import type { FootRoute, Turn } from "../brouter";
 import type { Fountain, RecencyMode } from "../schemas";
 import { useRun, type RunStop } from "./run";
 import { corePorts } from "../configure";
+import { ApiTimeoutError, isTransportError, readApiJson, type ApiReply } from "../apiResponse";
 
 // Wizard step indices, mirroring the web StepProgress (where → radius → build →
 // review). Kept here so core owns the phase→step mapping without importing web UI.
@@ -36,15 +37,32 @@ export type Draft = {
   turns: Turn[];
   autoIds?: number[];
   autoCount: number;
+  // The routed node order (vias included) and the user's direction choice.
+  // Absent in drafts saved before they were persisted.
+  order?: PlanNode[];
+  reversed?: boolean;
 };
 
 export type PlannerPhase = "config" | "map" | "run";
 export type SizeMode = "distance" | "points";
+// Which request the current error came from, so a Retry re-runs that one: a
+// failed route must not be "retried" by a fresh search, which drops the picks.
+export type PlannerErrSource = "points" | "route";
+
+// Ceilings against a dead connection, not budgets: past them the request is
+// abandoned with a retryable error instead of spinning forever (a phone's HTTP
+// stack may never time out a half-open socket). Both sit above the server's own
+// upstream limits: BRouter gets 40 s, and a search may fall back across
+// Overpass mirrors.
+const ROUTE_TIMEOUT_MS = 60_000;
+const POINTS_TIMEOUT_MS = 90_000;
 
 // Module-scoped monotonic counters (the planner is a single-instance route).
-// `planRequestSeq` drops stale overlapping plans; `recenterSeq` forces the map
-// to recenter even when coords repeat.
+// `planRequestSeq` and `pointsRequestSeq` drop results from requests that a
+// newer one (or a resumed draft) superseded; `recenterSeq` forces the map to
+// recenter even when coords repeat.
 let planRequestSeq = 0;
+let pointsRequestSeq = 0;
 let recenterSeq = 0;
 
 type PlannerState = {
@@ -73,6 +91,16 @@ type PlannerState = {
 
   fountains: Fountain[];
   stops: Fountain[];
+  // The committed route's nodes in visit order, via-points included (`stops`
+  // keeps only the fountains). Reversing works from this, so vias survive it.
+  order: PlanNode[];
+  // The user asked for the route the other way round. planRoute picks a
+  // direction on its own, so every re-plan applies this to keep the choice.
+  reversed: boolean;
+  // The picks, via-points or loop changed since `stops`/`line` were committed
+  // (a re-plan is in flight or failed), so they no longer match the selection
+  // on the map. Starting a run from them would run the old route.
+  routeStale: boolean;
   // Points the user explicitly took OUT of the route (e.g. auto-grabbed ones they
   // don't want). They stay excluded so re-planning / auto-pickup won't re-add them.
   excludedIds: number[];
@@ -90,8 +118,10 @@ type PlannerState = {
   autoCount: number;
   busy: string | null;
   err: string | null;
-  // Whether the current error is a transient server failure worth retrying.
+  // Whether the current error is a transient failure (offline, timed out, a
+  // server or upstream hiccup) that the same request can get past.
   errRetryable: boolean;
+  errSource: PlannerErrSource | null;
 
   // Session recovery: a saved route from a previous (interrupted) session, and a
   // gate so we don't persist a draft until the initial load has run.
@@ -115,6 +145,9 @@ type PlannerState = {
   findPoints: () => Promise<void>;
   finishConfig: () => Promise<void>;
   planAndRoute: () => Promise<void>;
+  // Re-plan the current selection after a failed route (never a fresh search,
+  // which would drop the picks).
+  retryRoute: () => Promise<void>;
   replan: () => void;
   makeRoute: () => Promise<void>;
   reverseRoute: () => Promise<void>;
@@ -126,9 +159,15 @@ type PlannerState = {
   addVia: (lat: number, lon: number) => void;
   removeVia: (i: number) => void;
   loadDraft: () => Promise<void>;
-  resumeDraft: () => void;
+  // Restore a saved route. Pass the draft the resume offer was made with: a
+  // search that started meanwhile clears `resumable`, and the user's choice
+  // must still apply.
+  resumeDraft: (d?: Draft) => void;
   dismissDraft: () => void;
-  startRun: () => Promise<void>;
+  // Resolves true once the run is set up; false when there is nothing to run
+  // or the route is still catching up (with `err` saying why), so the caller
+  // stays on the planner instead of opening an empty run.
+  startRun: () => Promise<boolean>;
   // The state-clearing half of leaving a finished run; the page also resets the
   // run session. Keeps the start area so the surveyor can build another route.
   resetAfterRun: () => void;
@@ -156,6 +195,95 @@ export function inRouteIdsOf(s: Pick<PlannerState, "stops" | "pinnedIds" | "excl
   return ids;
 }
 
+// Whether the map should search for points on its own: a start is known,
+// nothing is loaded or loading, no error is waiting on the user, and any saved
+// route has been offered and turned down. Searching while the resume offer is
+// open would wipe the stops the user is about to restore.
+export function shouldAutoFindPoints(s: {
+  center: Pt | null;
+  phase: PlannerPhase;
+  fountainsCount: number;
+  busy: string | null;
+  err: string | null;
+  draftReady: boolean;
+  resumable: Draft | null;
+}): boolean {
+  return (
+    s.center !== null &&
+    s.phase === "map" &&
+    s.fountainsCount === 0 &&
+    s.busy === null &&
+    !s.err &&
+    s.draftReady &&
+    !s.resumable
+  );
+}
+
+const UNREACHABLE = "Couldn't reach the server. Check your connection and try again.";
+const TOO_SLOW = "The server took too long to answer. Check your connection and try again.";
+const UNEXPECTED_REPLY = "The server sent an unexpected reply. Please try again.";
+
+// One call to our API, as a reply that never throws for network reasons. A
+// request that got no answer (offline, timed out, a captive portal) becomes a
+// retryable failure with a plain message, the same as a non-JSON error page,
+// instead of "Network request failed" or a JSON parse error with no Retry.
+async function callApi<T>(
+  path: string,
+  init: RequestInit,
+  timeoutMs: number,
+  fallback: string,
+): Promise<ApiReply<T>> {
+  let r: Response;
+  try {
+    r = await corePorts().api.apiFetch(path, init, { timeoutMs });
+  } catch (e) {
+    if (!isTransportError(e)) throw e;
+    const message = e instanceof ApiTimeoutError ? TOO_SLOW : UNREACHABLE;
+    return { ok: false, status: 0, message, retryable: true, body: undefined };
+  }
+  return readApiJson<T>(r, fallback);
+}
+
+const postJson = (body: unknown): RequestInit => ({
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body),
+});
+
+// The map geometry from a /api/route success, or null when the body isn't a
+// route after all.
+function routeGeometry(data: unknown): Pick<PlannerState, "line" | "distanceM" | "turns"> | null {
+  const d = data as Partial<FootRoute> | null;
+  if (!d || !Array.isArray(d.coords)) return null;
+  return {
+    // BRouter coords are [lon,lat]; the map line stores [lat,lon].
+    line: d.coords.map(([lon, lat]) => [lat, lon]),
+    distanceM: typeof d.distanceM === "number" ? d.distanceM : 0,
+    turns: Array.isArray(d.turns) ? d.turns : [],
+  };
+}
+
+// The error state for a failed /api/route reply (plan or reverse).
+function routeFailure(reply: Extract<ApiReply<unknown>, { ok: false }>) {
+  const island = (reply.body as { island?: Pt } | undefined)?.island;
+  return {
+    err: reply.message,
+    errRetryable: reply.retryable,
+    errSource: "route" as const,
+    islandPt: island ?? null,
+  };
+}
+
+const fountainsOf = (nodes: PlanNode[]) => nodes.filter((n) => n.fountain).map((n) => n.fountain!);
+
+// Clearing an error clears what came with it, so a Retry never lingers under a
+// message it doesn't belong to.
+const noErr: Pick<PlannerState, "err" | "errRetryable" | "errSource"> = {
+  err: null,
+  errRetryable: false,
+  errSource: null,
+};
+
 export const usePlanner = create<PlannerState>((set, get) => ({
   phase: "map",
   step: BUILD_STEP_INDEX,
@@ -177,6 +305,9 @@ export const usePlanner = create<PlannerState>((set, get) => ({
 
   fountains: [],
   stops: [],
+  order: [],
+  reversed: false,
+  routeStale: false,
   excludedIds: [],
   line: [],
   distanceM: 0,
@@ -188,13 +319,14 @@ export const usePlanner = create<PlannerState>((set, get) => ({
   busy: null,
   err: null,
   errRetryable: false,
+  errSource: null,
 
   resumable: null,
   draftReady: false,
 
   // Navigating between steps/phases wipes any stale error from the step you left.
-  setPhase: (phase) => set({ phase, err: null, islandPt: null }),
-  setStep: (step) => set({ step, err: null, islandPt: null }),
+  setPhase: (phase) => set({ phase, ...noErr, islandPt: null }),
+  setStep: (step) => set({ step, ...noErr, islandPt: null }),
   setAddr: (addr) => set({ addr }),
   setRadiusMi: (radiusMi) => set({ radiusMi }),
   setRecencyMode: (recencyMode) => set({ recencyMode }),
@@ -202,21 +334,29 @@ export const usePlanner = create<PlannerState>((set, get) => ({
   setTargetMi: (targetMi) => set({ targetMi }),
   setSizeMode: (sizeMode) => set({ sizeMode }),
   setLoop: (loop) => {
-    set({ loop });
+    set({ loop, routeStale: true });
     get().replan();
   },
-  setErr: (err) => set({ err }),
+  setErr: (err) => set({ ...noErr, err }),
 
   recenter: (p, animate = false) => {
     set({ center: p, recenterKey: `${p.lat},${p.lon},${++recenterSeq}`, animateRecenter: animate });
   },
 
   geolocate: () => {
-    set({ err: null });
+    // A fix can take a while. If the start moved meanwhile (a tap on the map, a
+    // resumed route), the user chose it: a late fix must not drag it away, and a
+    // late failure is no longer worth an error.
+    const before = get().center;
+    set(noErr);
     corePorts()
       .geolocation.getCurrentPosition()
-      .then((p) => get().recenter({ lat: p.lat, lon: p.lon }))
-      .catch((e) => set({ err: `Geolocation failed: ${(e as Error).message}` }));
+      .then((p) => {
+        if (get().center === before) get().recenter({ lat: p.lat, lon: p.lon });
+      })
+      .catch((e) => {
+        if (get().center === null) set({ err: `Geolocation failed: ${(e as Error).message}` });
+      });
   },
 
   searchAddr: async () => {
@@ -240,13 +380,19 @@ export const usePlanner = create<PlannerState>((set, get) => ({
   findPoints: async () => {
     const { center, radiusMi, tag, recencyMonths } = get();
     if (!center) return;
+    const seq = ++pointsRequestSeq;
+    const fresh = () => seq === pointsRequestSeq;
+    // A route still in flight belongs to the selection being wiped here.
+    ++planRequestSeq;
     // Building fresh — drop any pending resume offer so the new route persists.
     set({
       resumable: null,
       busy: "find",
-      err: null,
-      errRetryable: false,
+      ...noErr,
       stops: [],
+      order: [],
+      reversed: false,
+      routeStale: true,
       line: [],
       turns: [],
       pinnedIds: [],
@@ -257,10 +403,9 @@ export const usePlanner = create<PlannerState>((set, get) => ({
       islandPt: null,
     });
     try {
-      const r = await corePorts().api.apiFetch("/api/fountains", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const reply = await callApi<{ fountains?: Fountain[] }>(
+        "/api/fountains",
+        postJson({
           ...center,
           radiusM: milesToMeters(radiusMi || 0),
           tag,
@@ -268,26 +413,27 @@ export const usePlanner = create<PlannerState>((set, get) => ({
           recencyMode: "stale",
           recencyMonths: recencyMonths || 6,
         }),
-      });
-      const j = await r.json();
-      if (!r.ok) {
-        const e = j.error;
-        // Error can be a zod flatten ({formErrors}), a structured Overpass
-        // error ({message, retryable}), or a plain string.
-        const msg =
-          e?.formErrors?.join(", ") ||
-          e?.message ||
-          (typeof e === "string" ? e : "") ||
-          "Couldn't load points. Please try again.";
-        set({ errRetryable: !!e?.retryable });
-        throw new Error(msg);
+        POINTS_TIMEOUT_MS,
+        "Couldn't load points. Please try again.",
+      );
+      if (!fresh()) return;
+      const fountains = reply.ok ? reply.data?.fountains : undefined;
+      if (!reply.ok || !Array.isArray(fountains)) {
+        set({
+          err: reply.ok ? UNEXPECTED_REPLY : reply.message,
+          errRetryable: reply.ok || reply.retryable,
+          errSource: "points",
+        });
+        return;
       }
-      set({ fountains: j.fountains });
-      if (j.fountains.length === 0) set({ err: "No matching points in radius." });
+      set({ fountains });
+      if (fountains.length === 0) {
+        set({ err: "No matching points in radius.", errSource: "points" });
+      }
     } catch (e) {
-      set({ err: (e as Error).message });
+      if (fresh()) set({ err: (e as Error).message, errRetryable: false, errSource: "points" });
     } finally {
-      set({ busy: null });
+      if (fresh()) set({ busy: null });
     }
   },
 
@@ -310,7 +456,8 @@ export const usePlanner = create<PlannerState>((set, get) => ({
   // override threading: store actions write state synchronously, so `get()`
   // always sees the latest picks.
   planAndRoute: async () => {
-    const { center, fountains, pinnedIds, excludedIds, vias, loop, sizeMode, targetMi } = get();
+    const { center, fountains, pinnedIds, excludedIds, vias, loop, sizeMode, targetMi, reversed } =
+      get();
     if (!center || fountains.length === 0) return;
     // In points mode the route is sized purely by what the user picks, so the
     // target distance is ignored even if a value is left in the field.
@@ -319,7 +466,7 @@ export const usePlanner = create<PlannerState>((set, get) => ({
     // slow earlier fetch can't clobber a newer route.
     const seq = ++planRequestSeq;
     const fresh = () => seq === planRequestSeq;
-    set({ busy: "route", err: null, islandPt: null });
+    set({ busy: "route", ...noErr, islandPt: null });
     try {
       const { ordered, autoIds } = planRoute({
         start: center,
@@ -330,52 +477,63 @@ export const usePlanner = create<PlannerState>((set, get) => ({
         targetM: milesToMeters(target),
         loop,
       });
-      const chosen = ordered.filter((n) => n.fountain).map((n) => n.fountain!);
-      if (ordered.length === 0) {
+      const order = reversed ? [...ordered].reverse() : ordered;
+      if (order.length === 0) {
         if (!fresh()) return;
+        const err =
+          sizeMode === "distance"
+            ? "No points fit that distance. Increase target distance or add via-points."
+            : excludedIds.length > 0 || pinnedIds.length > 0
+              ? "No points left in the route — add one back or pin a point."
+              : null;
         set({
-          err:
-            sizeMode === "distance"
-              ? "No points fit that distance. Increase target distance or add via-points."
-              : excludedIds.length > 0 || pinnedIds.length > 0
-                ? "No points left in the route — add one back or pin a point."
-                : null,
+          err,
+          errSource: err ? "route" : null,
           stops: [],
+          order: [],
           line: [],
           distanceM: 0,
           turns: [],
           autoIds: [],
           autoCount: 0,
+          routeStale: false,
         });
         return;
       }
-      const points = [center, ...ordered.map((n) => ({ lat: n.lat, lon: n.lon }))];
-      const r = await corePorts().api.apiFetch("/api/route", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ points, loop }),
-      });
-      const j = await r.json();
+      const points = [center, ...order.map((n) => ({ lat: n.lat, lon: n.lon }))];
+      const reply = await callApi<FootRoute>(
+        "/api/route",
+        postJson({ points, loop }),
+        ROUTE_TIMEOUT_MS,
+        "Couldn't plan the route. Please try again.",
+      );
       if (!fresh()) return; // a newer plan superseded this one
-      if (!r.ok) {
-        if (j.island) set({ islandPt: j.island as Pt });
-        throw new Error(j.error || "routing failed");
+      if (!reply.ok) {
+        set(routeFailure(reply));
+        return;
+      }
+      const geometry = routeGeometry(reply.data);
+      if (!geometry) {
+        set({ err: UNEXPECTED_REPLY, errRetryable: true, errSource: "route" });
+        return;
       }
       set({
-        stops: chosen,
+        ...geometry,
+        stops: fountainsOf(order),
+        order,
         autoIds,
         autoCount: autoIds.length,
-        line: (j.coords as [number, number][]).map(([lon, lat]) => [lat, lon]),
-        distanceM: j.distanceM,
-        turns: (j.turns as Turn[]) ?? [],
         hasRoute: true,
+        routeStale: false,
       });
     } catch (e) {
-      if (fresh()) set({ err: (e as Error).message });
+      if (fresh()) set({ err: (e as Error).message, errRetryable: false, errSource: "route" });
     } finally {
       if (fresh()) set({ busy: null });
     }
   },
+
+  retryRoute: () => get().planAndRoute(),
 
   // Once a route exists (or in waypoints mode), every membership change re-plans immediately.
   replan: () => {
@@ -388,49 +546,60 @@ export const usePlanner = create<PlannerState>((set, get) => ({
     if (!s.center || s.fountains.length === 0) return;
     const target = s.sizeMode === "distance" ? s.targetMi || 0 : 0;
     if (s.sizeMode === "distance" && target <= 0) {
-      set({ err: "Enter a target distance." });
+      set({ ...noErr, err: "Enter a target distance." });
       return;
     }
     // Points mode: the route is sized by the points the user picks — so they have
     // to pick at least one (a pin or a waypoint) to define it.
     if (s.sizeMode === "points" && pinnedOf(s).length === 0 && s.vias.length === 0) {
-      set({ err: "Pin a point or add a waypoint to size your route." });
+      set({ ...noErr, err: "Pin a point or add a waypoint to size your route." });
       return;
     }
     await get().planAndRoute();
   },
 
   // Flip the visiting order of the route. Start (your location) stays fixed; the
-  // stops are walked in reverse, and the street geometry is re-fetched so one-way
-  // streets and turn costs are respected in the new direction.
+  // nodes (via-points included) are walked in reverse, and the street geometry
+  // is re-fetched so one-way streets and turn costs are respected in the new
+  // direction. On success the choice sticks: later re-plans keep this direction.
   reverseRoute: async () => {
-    const { center, stops, busy, loop } = get();
-    if (!center || stops.length < 2 || busy !== null) return;
-    const reversed = [...stops].reverse();
-    set({ busy: "reverse", err: null, islandPt: null });
+    const { center, order, stops, busy, loop, reversed, routeStale } = get();
+    if (!center || busy !== null) return;
+    if (routeStale || (order.length === 0 && stops.length > 0)) {
+      // The committed order doesn't match the selection (the last re-plan
+      // failed), or isn't known (a route resumed from an older draft): re-plan
+      // the current selection in the other direction instead.
+      set({ reversed: !reversed, routeStale: true });
+      await get().planAndRoute();
+      return;
+    }
+    if (order.length < 2) return;
+    const next = [...order].reverse();
+    set({ busy: "reverse", ...noErr, islandPt: null });
     const seq = ++planRequestSeq;
     const fresh = () => seq === planRequestSeq;
     try {
-      const points = [center, ...reversed.map((f) => ({ lat: f.lat, lon: f.lon }))];
-      const r = await corePorts().api.apiFetch("/api/route", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ points, loop }),
-      });
-      const j = await r.json();
+      const points = [center, ...next.map((n) => ({ lat: n.lat, lon: n.lon }))];
+      const reply = await callApi<FootRoute>(
+        "/api/route",
+        postJson({ points, loop }),
+        ROUTE_TIMEOUT_MS,
+        "Couldn't reverse the route. Please try again.",
+      );
       if (!fresh()) return;
-      if (!r.ok) {
-        if (j.island) set({ islandPt: j.island as Pt });
-        throw new Error(j.error || "routing failed");
+      // On failure the committed route still stands, in its old direction.
+      if (!reply.ok) {
+        set(routeFailure(reply));
+        return;
       }
-      set({
-        stops: reversed,
-        line: (j.coords as [number, number][]).map(([lon, lat]) => [lat, lon]),
-        distanceM: j.distanceM,
-        turns: (j.turns as Turn[]) ?? [],
-      });
+      const geometry = routeGeometry(reply.data);
+      if (!geometry) {
+        set({ err: UNEXPECTED_REPLY, errRetryable: true, errSource: "route" });
+        return;
+      }
+      set({ ...geometry, order: next, stops: fountainsOf(next), reversed: !reversed });
     } catch (e) {
-      if (fresh()) set({ err: (e as Error).message });
+      if (fresh()) set({ err: (e as Error).message, errRetryable: false, errSource: "route" });
     } finally {
       if (fresh()) set({ busy: null });
     }
@@ -442,6 +611,7 @@ export const usePlanner = create<PlannerState>((set, get) => ({
     set({
       excludedIds: excludedIds.filter((x) => x !== id),
       pinnedIds: pinnedIds.includes(id) ? pinnedIds : [...pinnedIds, id],
+      routeStale: true,
     });
     get().replan();
   },
@@ -453,6 +623,7 @@ export const usePlanner = create<PlannerState>((set, get) => ({
     set({
       pinnedIds: pinnedIds.filter((x) => x !== id),
       excludedIds: excludedIds.includes(id) ? excludedIds : [...excludedIds, id],
+      routeStale: true,
     });
     get().replan();
   },
@@ -467,23 +638,23 @@ export const usePlanner = create<PlannerState>((set, get) => ({
   // Undo a removal: let the planner consider the point again (it may be re-picked
   // by distance fill or small-detour pickup).
   restoreStop: (id) => {
-    set({ excludedIds: get().excludedIds.filter((x) => x !== id) });
+    set({ excludedIds: get().excludedIds.filter((x) => x !== id), routeStale: true });
     get().replan();
   },
 
   mapClick: (lat, lon) => {
     const { phase, center, vias } = get();
-    // Config phase auto-locates to the user's GPS, but a tap can still set/move
-    // the start — a fallback when location is denied or hasn't settled yet.
-    if (phase === "config") {
+    // Without a start (location denied, or no fix yet) a tap sets it, in any
+    // phase, and clears the geolocation error so the search can run. Config
+    // phase also lets a tap move an existing start.
+    if (!center || phase === "config") {
       get().recenter({ lat, lon });
+      if (!center) set(noErr);
       return;
     }
     // Map phase: a click drops a pass-through waypoint.
-    if (center) {
-      set({ vias: [...vias, { lat, lon }] });
-      get().replan();
-    }
+    set({ vias: [...vias, { lat, lon }], routeStale: true });
+    get().replan();
   },
 
   // Drop a pass-through waypoint at the tapped spot and re-plan around it.
@@ -492,13 +663,13 @@ export const usePlanner = create<PlannerState>((set, get) => ({
   addVia: (lat, lon) => {
     const { center, vias } = get();
     if (!center) return;
-    set({ vias: [...vias, { lat, lon }] });
+    set({ vias: [...vias, { lat, lon }], routeStale: true });
     get().replan();
   },
 
   // Remove a pass-through waypoint and re-plan around the rest.
   removeVia: (i) => {
-    set({ vias: get().vias.filter((_, j) => j !== i) });
+    set({ vias: get().vias.filter((_, j) => j !== i), routeStale: true });
     get().replan();
   },
 
@@ -518,11 +689,14 @@ export const usePlanner = create<PlannerState>((set, get) => ({
   },
 
   // Restore a saved route into the planner and jump to the map.
-  resumeDraft: () => {
-    const d = get().resumable;
+  resumeDraft: (d = get().resumable ?? undefined) => {
     if (!d) return;
+    // A search or plan still in flight would land on top of the restored route.
+    ++pointsRequestSeq;
+    ++planRequestSeq;
     get().recenter(d.center);
     set({
+      busy: null,
       tag: d.tag,
       radiusMi: d.radiusMi,
       recencyMode: d.recencyMode ?? "stale",
@@ -534,12 +708,20 @@ export const usePlanner = create<PlannerState>((set, get) => ({
       excludedIds: d.excludedIds ?? [],
       vias: d.vias,
       stops: d.stops,
+      // Without vias the stops are the whole order; with them and no saved
+      // order, reverseRoute re-plans rather than guess where the vias go.
+      order:
+        d.order ??
+        (d.vias.length === 0 ? d.stops.map((f) => ({ lat: f.lat, lon: f.lon, fountain: f })) : []),
+      reversed: d.reversed ?? false,
+      routeStale: false,
       line: d.line,
       distanceM: d.distanceM,
       turns: d.turns ?? [],
       autoIds: d.autoIds ?? [],
       autoCount: d.autoCount,
       hasRoute: d.stops.length > 0,
+      ...noErr,
       resumable: null,
       phase: "map",
       // A saved draft with a built route resumes on the review step; otherwise
@@ -560,7 +742,16 @@ export const usePlanner = create<PlannerState>((set, get) => ({
     const { center, stops, pinnedIds, loop, tag, vias, fountains, line, distanceM, turns } = get();
     const effectiveStops =
       stops.length > 0 ? stops : fountains.filter((f) => pinnedIds.includes(f.id));
-    if (!center || effectiveStops.length === 0) return;
+    if (!center || effectiveStops.length === 0) return false;
+    if (get().routeStale) {
+      // The stops and line on hand predate the latest change, so the run would
+      // follow a route the map no longer shows. A route error already says why
+      // (and carries the Retry), so only fill in when there is none.
+      if (!get().err) {
+        set({ err: "Your route is still updating. Try again once it has caught up." });
+      }
+      return false;
+    }
     const runStops: RunStop[] = effectiveStops.map((f) => ({ ...f, status: "pending" }));
     const plan = {
       start: center,
@@ -576,22 +767,21 @@ export const usePlanner = create<PlannerState>((set, get) => ({
       turns,
     };
     useRun.getState().setPlan(plan);
-    await corePorts().api.apiFetch("/api/run", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...plan, index: 0 }),
-    });
     // Route promoted to an active run; drop the planner draft so we don't re-offer it.
     corePorts()
       .api.apiFetch("/api/draft", { method: "DELETE" })
       .catch(() => {});
     // Stay on this map — just hand the side panel over to the live run.
     set({ phase: "run" });
+    return true;
   },
 
   resetAfterRun: () =>
     set({
       stops: [],
+      order: [],
+      reversed: false,
+      routeStale: false,
       line: [],
       turns: [],
       fountains: [],

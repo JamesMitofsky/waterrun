@@ -3,7 +3,7 @@ import { MAP_FRAMES, offsetFromCenter } from "@/lib/basemap/frames";
 import { DC_FOUNTAINS, DC_ROUTE, demoStopColor } from "@/lib/demoRoute";
 import { DEMO_RUN_END, demoRouteRunBy, demoRunnerAt, demoStatusesAt } from "@/lib/demoRun";
 import { ROUTE_LINE, START_FLAG } from "@/lib/basemap/routeLine";
-import { FlagIcon } from "phosphor-svelte";
+import StartFlagIcon from "@/components/icons/StartFlagIcon.svelte";
 
 /**
  * The hero run drawn into `MapFrame`'s loading state, in the positions the
@@ -185,7 +185,7 @@ const css = `[data-map-shot]{display:none}[data-map-shot="${fallback.id}"]{displ
           here at build time. Last, so it is over the runner that starts
           beneath it, as the live map's DOM marker is over the canvas. */}
       <g class="demo-route__flag" transform={`translate(${shot.flag.x} ${shot.flag.y})`}>
-        <FlagIcon size={START_FLAG.px} weight="fill" color={START_FLAG.color} />
+        <StartFlagIcon />
       </g>
     </svg>
   ))

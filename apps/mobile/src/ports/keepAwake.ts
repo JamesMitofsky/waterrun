@@ -1,6 +1,6 @@
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 
-const TAG = "rosm-run";
+const TAG = "water-run";
 
 export function keepAwake(): void {
   activateKeepAwakeAsync(TAG).catch(() => {});

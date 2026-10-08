@@ -1,16 +1,22 @@
-import { useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, Text, useWindowDimensions, View } from "react-native";
-import { useRouter } from "expo-router";
-import { BottomSheet, RNHostView } from "@expo/ui";
-import { CheckCircleIcon, SkipBackIcon, SkipForwardIcon, XCircleIcon } from "phosphor-react-native";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Pressable, ScrollView, Text, View, type LayoutChangeEvent } from "react-native";
+import { Redirect, useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { PointSheetHost } from "../components/ui/PointSheetHost";
+import { CheckCircleIcon } from "phosphor-react-native/src/icons/CheckCircle";
+import { SkipBackIcon } from "phosphor-react-native/src/icons/SkipBack";
+import { SkipForwardIcon } from "phosphor-react-native/src/icons/SkipForward";
+import { XCircleIcon } from "phosphor-react-native/src/icons/XCircle";
 import { DogIcon } from "../components/icons/DogIcon";
-import { fmtDist } from "@rosm/core/geo";
-import { STATUS_COLOR } from "@rosm/core/editStatus";
-import type { StopStatus } from "@rosm/core/stores/run";
-import { useOutbox } from "@rosm/core/stores/outbox";
-import { RosmMap } from "../map/RosmMap";
-import { useRunSession } from "../run/useRunSession";
-import { PointSheet } from "../components/PointSheet";
+import { fmtDist, maneuver } from "@water-run/core/geo";
+import { STATUS_COLOR } from "@water-run/core/editStatus";
+import { framePadding } from "@water-run/core/mapFrame";
+import type { StopStatus } from "@water-run/core/stores/run";
+import { useOutbox, type OutboxItem } from "@water-run/core/stores/outbox";
+import { LOCATION_BUTTON_BOTTOM, WaterRunMap } from "../map/WaterRunMap";
+import { useRunSession, type RunSession } from "../run/useRunSession";
+import { endRun } from "../run/runLifecycle";
+import { PointSheet, pointEditOf } from "../components/PointSheet";
 import { Button } from "../components/ui/Button";
 
 function checkedAgoLabel(tags?: Record<string, string>, now: Date = new Date()): string {
@@ -36,27 +42,58 @@ const STATUS_LABEL: Record<StopStatus, string> = {
   skipped: "Skipped",
 };
 
-function maneuver(deg: number): string {
-  const norm = ((deg % 360) + 360) % 360;
-  if (norm < 20 || norm > 340) return "Continue straight";
-  if (norm <= 45) return "Slight right";
-  if (norm <= 135) return "Turn right";
-  if (norm <= 160) return "Sharp right";
-  if (norm <= 200) return "U-turn";
-  if (norm <= 225) return "Sharp left";
-  if (norm <= 315) return "Turn left";
-  return "Slight left";
+// A point's latest queued edit: a later survey of it supersedes the earlier.
+function latestEdit(items: OutboxItem[], id: number | string): OutboxItem | undefined {
+  for (let i = items.length - 1; i >= 0; i--) {
+    if (String(items[i].nodeId) === String(id)) return items[i];
+  }
+  return undefined;
 }
 
 export default function RunScreen() {
-  const s = useRunSession();
+  const live = useRunSession();
+  // Finish ends the run at once, resetting the stores this screen reads, but
+  // the router only replaces the screen on its next render. Until then, and
+  // while the summary slides over it, the screen keeps showing the run as it
+  // was instead of an empty map and "Waiting for GPS…".
+  const [ended, setEnded] = useState<RunSession | null>(null);
+  const s = ended ?? live;
   const router = useRouter();
-  const { width: winW } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
 
   const [selectedId, setSelectedId] = useState<number | string | null>(null);
   const [addLocation, setAddLocation] = useState<{ lat: number; lon: number } | null>(null);
+  // The spot whose add sheet is open, kept in step with it as it opens and
+  // closes. An add settles up to its 30 s deadline later, and by then the sheet
+  // may have been swiped away or opened again at another spot.
+  const openAdd = useRef<{ lat: number; lon: number } | null>(null);
+  const showAdd = (at: { lat: number; lon: number } | null) => {
+    openAdd.current = at;
+    setAddLocation(at);
+  };
   const [confirm, setConfirm] = useState<{ i: number; action: "end" } | null>(null);
   const [now, setNow] = useState(() => new Date());
+
+  // The map keeps the runner and their next stop in the part of it the run
+  // panel doesn't cover, so both sizes are measured as they change. At the
+  // top, the status bar and the location button below it count as covered.
+  const [mapSize, setMapSize] = useState({ width: 0, height: 0 });
+  const [panelHeight, setPanelHeight] = useState(0);
+  const onScreenLayout = (e: LayoutChangeEvent) => {
+    const { width, height } = e.nativeEvent.layout;
+    setMapSize({ width, height });
+  };
+  const onPanelLayout = (e: LayoutChangeEvent) => setPanelHeight(e.nativeEvent.layout.height);
+  const mapPadding = useMemo(
+    () =>
+      framePadding({
+        width: mapSize.width,
+        height: mapSize.height,
+        coverTop: insets.top + LOCATION_BUTTON_BOTTOM,
+        coverBottom: panelHeight,
+      }),
+    [mapSize, insets.top, panelHeight],
+  );
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 30000);
@@ -72,10 +109,20 @@ export default function RunScreen() {
     [s.stops],
   );
 
-  const handleFinish = async () => {
-    const ok = await s.finish();
-    if (ok && s.routeId)
-      router.replace({ pathname: "/run-detail", params: { id: s.routeId, fresh: "1" } });
+  // Set synchronously, so Finish runs once. The button stays until the replace
+  // lands, and a second tap would freeze the screen on the reset run and queue
+  // a replace to the planner behind the one to the summary.
+  const finished = useRef(false);
+
+  // Finishing never waits on the network: the run ends on the device and the
+  // summary opens at once; the changeset closes in the background.
+  const handleFinish = () => {
+    if (finished.current) return;
+    finished.current = true;
+    setEnded(live);
+    const routeId = endRun();
+    if (routeId) router.replace({ pathname: "/run-detail", params: { id: routeId, fresh: "1" } });
+    else router.replace("/plan");
   };
 
   const onMarkerPress = (id: number | string) => {
@@ -83,7 +130,7 @@ export default function RunScreen() {
   };
 
   const onMapPress = (lat: number, lon: number) => {
-    setAddLocation({ lat, lon });
+    showAdd({ lat, lon });
   };
 
   const selectedPoint = useMemo(() => {
@@ -96,19 +143,16 @@ export default function RunScreen() {
     );
   }, [selectedId, s.stops, s.added, s.pool]);
 
-  const selectedEdit = useMemo(() => {
-    if (selectedId == null) return undefined;
-    const items = useOutbox.getState().items;
-    const it = items.find((x) => String(x.nodeId) === String(selectedId));
-    if (!it) return undefined;
-    return {
-      status: it.action,
-      summary: it.summary,
-      syncState: it.syncState,
-      changesetUrl: it.changesetUrl,
-      extras: it.extras,
-    };
-  }, [selectedId]);
+  // The tapped point's latest queued edit, followed while the sheet is open so
+  // its sync state (and a Retry) stays current. Only a change to that edit
+  // re-renders the screen.
+  const selectedItem = useOutbox((o) =>
+    selectedId == null ? undefined : latestEdit(o.items, selectedId),
+  );
+  const selectedEdit = useMemo(
+    () => (selectedItem ? pointEditOf(selectedItem) : undefined),
+    [selectedItem],
+  );
 
   const mapMarkers = useMemo(() => {
     if (!addLocation) return s.markers;
@@ -124,6 +168,10 @@ export default function RunScreen() {
     ];
   }, [s.markers, addLocation]);
 
+  // Reached with no run to show (a stale link, or the run already ended):
+  // back to where runs start.
+  if (s.nothingToResume) return <Redirect href="/plan" />;
+
   if (s.hydrating) {
     return (
       <View className="bg-base flex-1 items-center justify-center">
@@ -133,20 +181,27 @@ export default function RunScreen() {
   }
 
   return (
-    <View className="bg-base flex-1">
-      <RosmMap
+    <View className="bg-base flex-1" onLayout={onScreenLayout}>
+      <WaterRunMap
         center={s.center}
-        bearing={s.mapBearing ?? undefined}
         markers={mapMarkers}
         line={s.line}
-        userPos={s.userPos}
-        recenterKey={s.recenterKey}
+        showUserLocation={s.located}
         fitPoints={s.fitPoints}
+        framePadding={mapPadding}
         showLocationButton
         onMarkerPress={onMarkerPress}
         onMapPress={onMapPress}
       />
-      <View className="bg-base border-light/10 absolute right-0 bottom-0 left-0 border-t px-5 pt-5 pb-8">
+      {/* A full-screen stack screen, so the root provider's inset is this
+          screen's: the panel clears the home indicator and Android's 3-button
+          bar (48dp; edge to edge is always on), and keeps at least its own
+          32pt below the last button. */}
+      <View
+        className="bg-base border-light/10 absolute right-0 bottom-0 left-0 border-t px-5 pt-5"
+        style={{ paddingBottom: Math.max(32, insets.bottom + 8) }}
+        onLayout={onPanelLayout}
+      >
         {s.done ? (
           <>
             <Text className="text-light text-lg font-bold">Run complete</Text>
@@ -187,12 +242,7 @@ export default function RunScreen() {
                 No points surveyed. Finish to save your route.
               </Text>
             )}
-            <Button
-              title="Finish run"
-              variant="blue"
-              onPress={handleFinish}
-              loading={s.finishing}
-            />
+            <Button title="Finish run" variant="blue" onPress={handleFinish} />
           </>
         ) : s.target ? (
           <>
@@ -297,44 +347,47 @@ export default function RunScreen() {
         {s.err ? <Text className="text-red-400">{s.err}</Text> : null}
       </View>
 
-      <BottomSheet isPresented={selectedId != null} onDismiss={() => setSelectedId(null)}>
-        <RNHostView matchContents>
-          <View style={{ width: winW - 32 }}>
-            {selectedPoint ? (
-              <PointSheet
-                fountain={selectedPoint}
-                edit={selectedEdit}
-                onAction={(action, extras) => {
-                  s.recordFor(selectedPoint, action, extras);
-                  setSelectedId(null);
-                }}
-              />
-            ) : null}
-          </View>
-        </RNHostView>
-      </BottomSheet>
+      <PointSheetHost isPresented={selectedId != null} onDismiss={() => setSelectedId(null)}>
+        {selectedPoint ? (
+          <PointSheet
+            fountain={selectedPoint}
+            edit={selectedEdit}
+            onAction={(action, extras) => {
+              s.recordFor(selectedPoint, action, extras);
+              setSelectedId(null);
+            }}
+          />
+        ) : null}
+      </PointSheetHost>
 
-      <BottomSheet isPresented={addLocation != null} onDismiss={() => setAddLocation(null)}>
-        <RNHostView matchContents>
-          <View style={{ width: winW - 32 }}>
-            {addLocation ? (
-              <PointSheet
-                fountain={{
-                  id: -1,
-                  lat: addLocation.lat,
-                  lon: addLocation.lon,
-                  tags: { amenity: "drinking_water" },
-                }}
-                onAction={async (_action, extras) => {
-                  const loc = addLocation;
-                  setAddLocation(null);
-                  await s.addAt(loc, extras);
-                }}
-              />
-            ) : null}
-          </View>
-        </RNHostView>
-      </BottomSheet>
+      <PointSheetHost isPresented={addLocation != null} onDismiss={() => showAdd(null)}>
+        {addLocation ? (
+          <PointSheet
+            fountain={{
+              id: -1,
+              lat: addLocation.lat,
+              lon: addLocation.lon,
+              tags: { amenity: "drinking_water" },
+            }}
+            // The sheet, and what was typed into it, stays until the point
+            // exists: a failed add shows its reason there for another try.
+            // Once the sheet has been swiped away (it can be, mid-save) the
+            // reason goes to the run panel instead, and a late success leaves
+            // alone a sheet since opened at another spot.
+            onAction={async (_action, extras) => {
+              try {
+                await s.addAt(addLocation, extras);
+              } catch (e) {
+                if (openAdd.current !== addLocation) {
+                  s.reportError(`Point not added. ${e instanceof Error ? e.message : String(e)}`);
+                }
+                throw e;
+              }
+              if (openAdd.current === addLocation) showAdd(null);
+            }}
+          />
+        ) : null}
+      </PointSheetHost>
     </View>
   );
 }

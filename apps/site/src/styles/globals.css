@@ -1,16 +1,20 @@
 @import "tailwindcss";
 
-/* Self-hosted variable fonts (was next/font/local). Served from /public/fonts. */
+/* Self-hosted variable fonts (was next/font/local). Relative URLs into
+   src/assets, not absolute ones into public/, so Vite fingerprints them into
+   /_astro/ and they are cached as immutable with the rest of the build; from
+   public/ they were re-validated on every page load. Layout.astro preloads Jua
+   by importing the same file, so its href and this url() stay one URL. */
 @font-face {
   font-family: "Space Grotesk";
-  src: url("/fonts/SpaceGrotesk-Variable.woff2") format("woff2");
+  src: url("../assets/fonts/SpaceGrotesk-Variable.woff2") format("woff2");
   font-weight: 300 700;
   font-display: swap;
   font-style: normal;
 }
 @font-face {
   font-family: "Inter";
-  src: url("/fonts/Inter-Variable.woff2") format("woff2");
+  src: url("../assets/fonts/Inter-Variable.woff2") format("woff2");
   font-weight: 100 900;
   font-display: swap;
   font-style: normal;
@@ -21,7 +25,7 @@
    which is everything this site sets in it. */
 @font-face {
   font-family: "Jua";
-  src: url("/fonts/Jua-Latin.woff2") format("woff2");
+  src: url("../assets/fonts/Jua-Latin.woff2") format("woff2");
   /* The face ships one weight. Stated so the browser knows that, rather than
      assuming the file covers every weight asked of it. */
   font-weight: 400;
@@ -136,15 +140,10 @@ body {
   padding-bottom: env(safe-area-inset-bottom);
 }
 
-/* MapLibre uses the app font, and its popups drop the default chrome padding so
-   our own popup bodies control their spacing. */
-.maplibregl-map {
-  font: inherit;
-}
-.maplibregl-popup-content {
-  padding: 0.5rem 0.625rem;
-  border-radius: 0.5rem;
-}
+/* Map popups keep MapLibre's own font (12px/20px Helvetica), padding and
+   corners. maplibre-gl.css loads after this sheet, so overrides here at equal
+   specificity never applied, and the popup bodies were designed against that
+   look. Re-styling them means a more specific selector in MapView. */
 /* The shadow is cast by the popup as a whole, not the card: the tip is a
    border-drawn triangle that a `box-shadow` on the card cannot follow, so
    a `drop-shadow` on their parent traces card and tip as one silhouette.
@@ -180,10 +179,29 @@ body {
   transform-origin: 50% 100%;
   animation: popup-pop 380ms ease-out both;
 }
-/* Opened beneath its marker, the popup meets it at its top edge instead. */
-.maplibregl-popup-anchor-top .maplibregl-popup-content,
-.maplibregl-popup-anchor-top .maplibregl-popup-tip {
+/* Opened on any other side, the anchor class names the edge or corner that
+   meets the marker — MapLibre picks one that fits the map whenever a popup
+   gives no anchor of its own — so the spring pivots there instead. */
+.maplibregl-popup-anchor-top :is(.maplibregl-popup-content, .maplibregl-popup-tip) {
   transform-origin: 50% 0;
+}
+.maplibregl-popup-anchor-top-left :is(.maplibregl-popup-content, .maplibregl-popup-tip) {
+  transform-origin: 0 0;
+}
+.maplibregl-popup-anchor-top-right :is(.maplibregl-popup-content, .maplibregl-popup-tip) {
+  transform-origin: 100% 0;
+}
+.maplibregl-popup-anchor-bottom-left :is(.maplibregl-popup-content, .maplibregl-popup-tip) {
+  transform-origin: 0 100%;
+}
+.maplibregl-popup-anchor-bottom-right :is(.maplibregl-popup-content, .maplibregl-popup-tip) {
+  transform-origin: 100% 100%;
+}
+.maplibregl-popup-anchor-left :is(.maplibregl-popup-content, .maplibregl-popup-tip) {
+  transform-origin: 0 50%;
+}
+.maplibregl-popup-anchor-right :is(.maplibregl-popup-content, .maplibregl-popup-tip) {
+  transform-origin: 100% 50%;
 }
 @media (prefers-reduced-motion: reduce) {
   .maplibregl-popup-content,
@@ -230,9 +248,12 @@ body {
 }
 
 /* Scroll-reveal (was framer-motion fadeUp). Blocks start hidden + shifted, then
-   the IntersectionObserver adds .in-view to animate to rest. No-JS/reduced-motion
-   fallback keeps everything visible. */
-.reveal {
+   index.astro's IntersectionObserver adds .in-view to animate them to rest.
+   Hidden only under `.js`, which an inline script in Layout's head sets on
+   <html> before first paint: when scripts never run, nothing would add
+   .in-view, so the blocks just render in place. Reduced motion shows them at
+   rest. */
+.js .reveal {
   opacity: 0;
   transform: translateY(24px);
   will-change: transform, opacity;
@@ -240,15 +261,33 @@ body {
     opacity 0.55s cubic-bezier(0.22, 1, 0.36, 1),
     transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
 }
-.reveal.in-view {
+.js .reveal.in-view {
   opacity: 1;
   transform: none;
 }
+/* The same entrance for the blocks already on screen at load (the hero), as an
+   animation that starts with first paint rather than when the observer's
+   script gets to run. Same curve, distance and length; `--reveal-delay` stands
+   in for the stagger `transition-delay` gave. `backwards` holds the hidden
+   frame through the delay, and the end frame is the element's own style, so
+   nothing stays applied afterwards. Needs no JS. */
+@keyframes reveal-in {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+}
+.reveal-now {
+  animation: reveal-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) var(--reveal-delay, 0s) backwards;
+}
 @media (prefers-reduced-motion: reduce) {
-  .reveal {
+  .js .reveal {
     opacity: 1;
     transform: none;
     transition: none;
+  }
+  .reveal-now {
+    animation: none;
   }
 }
 

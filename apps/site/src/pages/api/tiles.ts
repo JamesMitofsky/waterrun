@@ -1,7 +1,12 @@
 import type { APIRoute } from "astro";
 import { OPENFREEMAP_TILEJSON } from "@/lib/basemap/tiles";
+import { UpstreamTimeoutError, upstreamFetch } from "@/lib/upstream";
 
 export const prerender = false;
+
+// The map can't draw a single tile until this document arrives, so a stalled
+// OpenFreeMap fails fast here and MapLibre's own error path takes over.
+const TILEJSON_TIMEOUT_MS = 5_000;
 
 // OpenFreeMap's TileJSON carries an `attribution` string
 // ("OpenFreeMap © OpenMapTiles Data from OpenStreetMap") that MapLibre
@@ -11,7 +16,7 @@ export const prerender = false;
 // direct and the (periodically rotated) planet version stays current.
 export const GET: APIRoute = async () => {
   try {
-    const res = await fetch(OPENFREEMAP_TILEJSON);
+    const res = await upstreamFetch(OPENFREEMAP_TILEJSON, { timeoutMs: TILEJSON_TIMEOUT_MS });
     if (!res.ok) {
       return Response.json({ error: { message: `upstream ${res.status}` } }, { status: 502 });
     }
@@ -35,6 +40,10 @@ export const GET: APIRoute = async () => {
       },
     });
   } catch (e) {
-    return Response.json({ error: { message: (e as Error).message } }, { status: 502 });
+    const timedOut = e instanceof UpstreamTimeoutError;
+    return Response.json(
+      { error: { message: timedOut ? "upstream timed out" : "upstream failed" } },
+      { status: timedOut ? 504 : 502 },
+    );
   }
 };

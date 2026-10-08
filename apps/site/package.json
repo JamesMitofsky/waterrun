@@ -1,11 +1,11 @@
 {
-  "name": "@rosm/site",
+  "name": "@water-run/site",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build",
+    "build": "astro build && tsx scripts/patch-vercel-routes.ts",
     "preview": "astro preview",
     "lint": "eslint",
     "map:placeholders": "tsx scripts/build-map-placeholders.ts",
@@ -17,7 +17,7 @@
   "dependencies": {
     "@astrojs/svelte": "^9.0.1",
     "@astrojs/vercel": "^11.0.10",
-    "@rosm/core": "workspace:*",
+    "@water-run/core": "workspace:*",
     "@tailwindcss/vite": "^4.3.3",
     "astro": "^7.3.2",
     "canvas-confetti": "^1.9.4",
@@ -31,9 +31,9 @@
   "devDependencies": {
     "@astrojs/check": "^0.9.10",
     "@eslint/js": "^9.39.4",
-    "@rosm/typescript-config": "workspace:*",
     "@types/canvas-confetti": "^1.9.0",
     "@types/geojson": "^7946.0.16",
+    "@vitest/coverage-v8": "^4.1.9",
     "astro-eslint-parser": "^3.0.0",
     "eslint": "^10.7.0",
     "eslint-config-prettier": "^10.1.8",

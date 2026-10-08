@@ -245,7 +245,11 @@
     FullScreenControl,
   } from "svelte-maplibre-gl";
   import { setMapPopup } from "@/lib/mapPopup";
-  import { ArrowCounterClockwise, FlagIcon } from "phosphor-svelte";
+  import { isFatalMapError, type MapFailure } from "@/lib/mapFailure";
+  import { nearestTo, tapSlopPx } from "@/lib/mapTap";
+  import { visibleTimeout } from "@/lib/visibleTimeout";
+  import ArrowCounterClockwise from "phosphor-svelte/lib/ArrowCounterClockwise";
+  import FlagIcon from "phosphor-svelte/lib/FlagIcon";
 
   type Props = {
     center: [number, number];
@@ -310,7 +314,9 @@
     // beat — two close together, then a rest — until the caller clears it. A
     // call to action, not a status — louder than a `pulses` ping, and on a
     // loop where a ping marks one moment. Drawn in CSS over the map rather
-    // than on the canvas, so the loop costs no repaint.
+    // than on the canvas, so the loop costs the map no WebGL redraw — the
+    // page still restyles and repaints the waves every frame, which is why
+    // the loop pauses while the map is scrolled out of view.
     beckon?: string | null;
     onViewChange?: (
       view: {
@@ -338,8 +344,13 @@
     // Fired on a fatal (pre-load) map failure so callers can stop their own
     // loaders and let the error surface.
     onError?: (err: unknown) => void;
+    // Fired when the map has really loaded (MapLibre's `load`) over a usable
+    // basemap — never for a fatal failure, whose `load` fires over a blank map.
+    // View reports are no substitute: a resize or an opening jump reports a
+    // view before the map has loaded anything.
+    onLoad?: () => void;
     // Fired once, when the map tells its loading frame to clear — the same
-    // moment as the `rosm:map-ready` event, for the caller that rendered this
+    // moment as the `water-run:map-ready` event, for the caller that rendered this
     // map and wants to start something the visitor will actually see. Fires
     // on failure too (the frame clears to the error card either way).
     onReady?: () => void;
@@ -376,6 +387,7 @@
     class: className,
     hidePlaceLabels = false,
     onError,
+    onLoad,
     onReady,
     markerPopup,
   }: Props = $props();
@@ -401,8 +413,29 @@
   // 0 → 1 grow factor for the pop-in.
   let popScale = $state(1);
 
+  // North-up and flat, always: the pen, `clampToPen` and the card placement
+  // all do their sums in a flat, unrotated Mercator (see `WORLD_TILE_PX`), and
+  // no map here has a compass to undo a turn with. The props switch off the
+  // drag and two-finger gestures, but the keyboard's Shift+arrows still turn
+  // and tilt, and the pinch still turns — only `disableRotation` stops them,
+  // and it outlives the enable/disable that `interactive` toggles. Done as
+  // soon as the map exists rather than on load, so it holds from the first
+  // frame. Tilt is capped at zero besides (`maxPitch`), whatever the input.
+  $effect(() => {
+    if (!map) return;
+    map.keyboard.disableRotation();
+    map.touchZoomRotate.disableRotation();
+  });
+
+  // Whether the open card is holding a draft (`holdOpen` in mapPopup.ts), so a
+  // tap on the bare map only takes focus out of it. Read on tap, never
+  // rendered, so plain rather than state.
+  let held = false;
   // Popup content dismisses itself through this context (was useMapPopup).
-  setMapPopup({ close: () => (selected = null) });
+  setMapPopup({
+    close: () => (selected = null),
+    holdOpen: (on) => (held = on),
+  });
 
   // Duration for a camera move this component starts: the given length, or a
   // cut when the visitor has asked for reduced motion.
@@ -535,11 +568,15 @@
   // Back to the view the map opened on — the configured `center`/`zoom`, the
   // same pair the loading frame was drawn at, not wherever the camera was when
   // it loaded. Under `lockToOpeningView` that view is inside the pen by
-  // construction, so this move never has to be clamped.
+  // construction, so this move never has to be clamped. Bearing and pitch go
+  // back to zero too: nothing should be able to change them (see the rotation
+  // effect above), but reset means the whole opening view.
   function resetView() {
     map?.easeTo({
       center: [center[1], center[0]],
       zoom,
+      bearing: 0,
+      pitch: 0,
       duration: motionMs(600),
       essential: true,
     });
@@ -567,6 +604,24 @@
       `--beckon-wave-r: ${waveR}px`,
       `--beckon-from: ${dotR / waveR}`,
     ].join("; ");
+  });
+  // Whether the map is scrolled out of view, while something beckons. The
+  // beckon's loop costs the page a restyle and repaint every frame, for as
+  // long as it runs — which, on the landing hero, is until the visitor opens
+  // the stop, however far down the page they have read. Off-screen it pauses
+  // (see the style block) and picks up where it left off on the way back.
+  let offscreen = $state(false);
+  $effect(() => {
+    const el = root;
+    if (!el || beckon == null) return;
+    const io = new IntersectionObserver((entries) => {
+      offscreen = !entries[entries.length - 1].isIntersecting;
+    });
+    io.observe(el);
+    return () => {
+      io.disconnect();
+      offscreen = false;
+    };
   });
   const runnerData = $derived<GeoJSON.Feature | null>(
     runner
@@ -707,7 +762,12 @@
   // on a timer — a blank/hung map must not masquerade as loaded, or the loader
   // hides over nothing and later errors get swallowed by the post-load gate.
   let isLoaded = $state(false);
-  let hasError = $state(false);
+  // Why the error card is up, if it is. Kept as a reason rather than a flag
+  // because the two end differently: a timeout is lifted by a late `load`, a
+  // fatal failure never is (`load` fires over a blank map too — see
+  // `isFatalMapError`).
+  let failure = $state<MapFailure | null>(null);
+  const hasError = $derived(failure !== null);
 
   // The element `MapFrame.astro`'s loading overlay listens on. The reveal
   // travels as a bubbling DOM event, so the island and the server-rendered
@@ -736,7 +796,7 @@
     // One frame of slack: `load` fires *before* the browser has composited that
     // first frame, so revealing synchronously can dissolve to a blank canvas.
     requestAnimationFrame(() => {
-      root?.dispatchEvent(new CustomEvent("rosm:map-ready", { bubbles: true }));
+      root?.dispatchEvent(new CustomEvent("water-run:map-ready", { bubbles: true }));
       onReady?.();
     });
   }
@@ -781,18 +841,20 @@
   // Hard ceiling: MapLibre can sit forever if the tile source (via /api/tiles →
   // OpenFreeMap) stalls without ever firing `load` or `error`. Give up at 20s so
   // the loader can't spin indefinitely — surface the fallback instead.
+  //
+  // Twenty seconds *on screen*. MapLibre only draws, and so only fires `load`,
+  // while the tab is visible; a wall-clock timer would fail every map opened
+  // in a background tab before it had drawn a frame. And giving up is
+  // provisional: `handleLoad` takes the card down if the map turns up after.
   const LOAD_TIMEOUT_MS = 20_000;
   $effect(() => {
     if (isLoaded || hasError) return;
-    const timer = setTimeout(() => {
-      if (!isLoaded) {
-        console.error("MapLibre load timeout after", LOAD_TIMEOUT_MS, "ms");
-        hasError = true;
-        signalReady();
-        onError?.(new Error("Map load timed out"));
-      }
-    }, LOAD_TIMEOUT_MS);
-    return () => clearTimeout(timer);
+    return visibleTimeout(LOAD_TIMEOUT_MS, () => {
+      console.error("MapLibre load timeout after", LOAD_TIMEOUT_MS, "ms");
+      failure = "timeout";
+      signalReady();
+      onError?.(new Error("Map load timed out"));
+    });
   });
 
   // Defer painting the fallback: a genuine failure persists past the delay,
@@ -809,16 +871,31 @@
   });
 
   // Map/style/tile failures surface here. Flag once so the fallback replaces
-  // the loader instead of leaving a stuck spinner or a blank canvas. Only
-  // fatal (pre-load) failures trip it — a lone tile 404 on a working map
-  // shouldn't wipe the whole view.
+  // the loader instead of leaving a blank canvas. Only a fatal failure before
+  // load trips it (`isFatalMapError`): a tile that failed on a phone's flaky
+  // first load, or a missing sprite, still leaves a map worth showing, and
+  // after load nothing should wipe a view the visitor is already using.
   function handleError(ev: maplibregl.ErrorEvent) {
     console.error("MapLibre error", ev.error);
-    if (!isLoaded) {
-      hasError = true;
-      signalReady();
-      onError?.(ev.error);
-    }
+    if (isLoaded || !isFatalMapError(ev)) return;
+    fail(ev.error);
+  }
+
+  // A throw from inside the map's own subtree (the `<svelte:boundary>` in the
+  // markup). The one that matters is MapLibre's constructor, which throws
+  // outright when the browser cannot give it a WebGL context — acceleration
+  // off, a blocklisted GPU, a remote desktop. With nothing to catch it, the
+  // throw aborts Svelte's effect flush, `handleError` never hears of it, and
+  // the visitor waits out the load timeout for an answer known at once.
+  function handleCrash(err: unknown) {
+    console.error("Map crashed", err);
+    fail(err);
+  }
+
+  function fail(err: unknown) {
+    failure = "fatal";
+    signalReady();
+    onError?.(err);
   }
 
   // Pop new dots in: grow circle-radius 0 → target whenever the marker set
@@ -880,8 +957,18 @@
   // card on a marker near the floor of the visible area has to open upward
   // however the page would like it, or it opens into the furniture below.
   // `null` until that runs, when the preference is what is drawn.
+  //
+  // Only under `centerOnSelect`, which moves the camera to make room for the
+  // card. Without it the camera stays put, so a marker that names no side is
+  // left to MapLibre, which picks — and keeps re-picking as the map moves —
+  // whichever side, corner included, keeps the card inside the map: forced
+  // above and centred, a card on a marker near an edge opens half cut off.
   let popupSide = $state<"top" | "bottom" | null>(null);
-  const popupAnchor = $derived(popupSide ?? selectedMarker?.popupAnchor ?? "bottom");
+  const popupAnchor = $derived(
+    centerOnSelect
+      ? (popupSide ?? selectedMarker?.popupAnchor ?? "bottom")
+      : selectedMarker?.popupAnchor,
+  );
   // A new selection is a fresh decision; the side the last card settled on
   // says nothing about this one.
   $effect(() => {
@@ -1050,7 +1137,10 @@
 
   function handleLoad() {
     isLoaded = true;
-    map?.touchZoomRotate.disableRotation();
+    // A late load is a success: the map was only slow (or in a background
+    // tab), so the timeout's card comes down. A fatal failure's stays — `load`
+    // fires over a blank map too.
+    if (failure === "timeout") failure = null;
     doRecenter();
     // After `doRecenter`, so the pen is measured around the view the map
     // actually settled on.
@@ -1059,6 +1149,7 @@
     // The controls exist now; the visible area is measured before they do.
     measureVisible?.();
     emitView(false);
+    if (failure !== "fatal") onLoad?.();
     const attrEl = map?.getContainer().querySelector(".maplibregl-ctrl-attrib");
     attrEl?.classList.remove("maplibregl-compact-show");
     if (hidePlaceLabels && map) {
@@ -1077,13 +1168,33 @@
 
   function handleClick(ev: maplibregl.MapMouseEvent) {
     if (!map || !interactive) return;
-    const feats = map.queryRenderedFeatures(ev.point, { layers: [MARKERS_LAYER] });
-    const f = feats[0];
-    if (f) {
-      const mid = f.properties?.mid as string | undefined;
-      const m = mid != null ? markerById.get(mid) : undefined;
-      if (m && markerPopup && !m.noPopup) selected = mid ?? null;
+    const mapInst = map;
+    // The tap, grown to a fingertip's reach (mapTap.ts); of the dots it
+    // catches, the one nearest where it landed. Not while a draft is open in
+    // the card (`held`): a tap near a dot is then most likely meant to put the
+    // keyboard away, and switching the selection would throw the draft out, so
+    // only a tap right on a dot counts.
+    const { x, y } = ev.point;
+    const slop = held ? 0 : tapSlopPx(markerRadius + MARKER_STROKE_PX);
+    const feats = mapInst.queryRenderedFeatures(
+      [
+        [x - slop, y - slop],
+        [x + slop, y + slop],
+      ],
+      { layers: [MARKERS_LAYER] },
+    );
+    if (feats.length) {
+      const hits = feats.flatMap((f) => markerById.get(String(f.properties?.mid)) ?? []);
+      const m = nearestTo(ev.point, hits, (h) => mapInst.project([h.lon, h.lat]));
+      if (m && markerPopup && !m.noPopup) selected = String(m.id);
       else m?.onClick?.();
+      return;
+    }
+    // The bare map, with a draft open in the card (`holdOpen`): put the
+    // keyboard away and nothing else. Focus is let go of by hand because a
+    // tap on the canvas does not reliably take it on every platform.
+    if (held) {
+      (document.activeElement as HTMLElement | null)?.blur();
       return;
     }
     selected = null;
@@ -1093,12 +1204,23 @@
     const c = map?.getCanvas();
     if (c) c.style.cursor = v;
   }
+
+  // For the content of a decorative DOM marker. MapLibre gives every marker
+  // element `role="button"` and the label "Map marker" unless it already has
+  // them, so the stop numbers, the beckon and the start flag would each be
+  // announced as a button that does nothing. That element is the content's
+  // parent — the container svelte-maplibre-gl hands MapLibre — so it is hidden
+  // from assistive tech from here.
+  function hideMarkerFromAT(content: HTMLElement) {
+    content.parentElement?.setAttribute("aria-hidden", "true");
+  }
 </script>
 
 <div
   bind:this={root}
   class="map-view-root {className}"
   style="position: relative; height: 100%; width: 100%;"
+  data-offscreen={offscreen || undefined}
 >
   {#if showError}
     <div
@@ -1142,220 +1264,229 @@
        part transparent, so the map dimmed on its way in instead of simply being
        uncovered. Nothing is lost by leaving it solid — until `MapFrame`'s
        overlay clears, this is hidden behind it — and it keeps a live WebGL
-       canvas out of a composited opacity animation. -->
-  <MapLibre
-    bind:map
-    style={mapStyle}
-    inlineStyle="height: 100%; width: 100%;"
-    autoloadGlobalCss={false}
-    attributionControl={false}
-    center={[center[1], center[0]]}
-    {zoom}
-    minZoom={zoomFloor}
-    maxBounds={openingBounds}
-    {maxZoom}
-    dragPan={interactive}
-    dragRotate={false}
-    pitchWithRotate={false}
-    touchPitch={false}
-    scrollZoom={wheelZoom}
-    {cooperativeGestures}
-    doubleClickZoom={interactive}
-    touchZoomRotate={interactive}
-    boxZoom={interactive}
-    keyboard={interactive}
-    onload={handleLoad}
-    onzoom={trackZoomLimits}
-    onidle={signalReady}
-    onerror={handleError}
-    onclick={handleClick}
-    onmoveend={(ev) => emitView(!!(ev as { originalEvent?: unknown }).originalEvent)}
-  >
-    <AttributionControl customAttribution={ATTRIBUTION} compact />
+       canvas out of a composited opacity animation.
 
-    {#if cooperativeGestures}
-      <!-- View controls in place of MapLibre's flashing screen: with the wheel
-           handed to the page, these are the visible way to move the map.
-           Bottom-left is lifted clear of anything the page lays over the map's
-           lower edge by `--map-ctrl-inset-bottom`. -->
-      <CustomControl position="bottom-left" group={false} class="view-controls">
-        <div class="maplibregl-ctrl-group">
-          <button
-            type="button"
-            class="view-controls__reset"
-            title="Reset view"
-            aria-label="Reset view"
-            disabled={!interactive}
-            onclick={resetView}
-          >
-            <ArrowCounterClockwise size={18} weight="bold" aria-hidden="true" />
-          </button>
-        </div>
-        <div class="maplibregl-ctrl-group">
-          <button
-            type="button"
-            class="maplibregl-ctrl-zoom-out"
-            title="Zoom out"
-            aria-label="Zoom out"
-            disabled={!interactive || atMinZoom}
-            onclick={() => map?.zoomOut({ around: visibleCentre(), duration: motionMs(300) })}
-          >
-            <span class="maplibregl-ctrl-icon" aria-hidden="true"></span>
-          </button>
-          <button
-            type="button"
-            class="maplibregl-ctrl-zoom-in"
-            title="Zoom in"
-            aria-label="Zoom in"
-            disabled={!interactive || atMaxZoom}
-            onclick={() => map?.zoomIn({ around: visibleCentre(), duration: motionMs(300) })}
-          >
-            <span class="maplibregl-ctrl-icon" aria-hidden="true"></span>
-          </button>
-        </div>
-      </CustomControl>
-    {/if}
+       Inside a boundary (`handleCrash`) so a throw from the map's subtree —
+       MapLibre's constructor finding no WebGL, above all — turns into the error
+       card at once; the card is outside it, so it survives the teardown. -->
+  <svelte:boundary onerror={handleCrash}>
+    <MapLibre
+      bind:map
+      style={mapStyle}
+      inlineStyle="height: 100%; width: 100%;"
+      autoloadGlobalCss={false}
+      attributionControl={false}
+      center={[center[1], center[0]]}
+      {zoom}
+      minZoom={zoomFloor}
+      maxBounds={openingBounds}
+      {maxZoom}
+      dragPan={interactive}
+      dragRotate={false}
+      pitchWithRotate={false}
+      touchPitch={false}
+      maxPitch={0}
+      scrollZoom={wheelZoom}
+      {cooperativeGestures}
+      doubleClickZoom={interactive}
+      touchZoomRotate={interactive}
+      boxZoom={interactive}
+      keyboard={interactive}
+      onload={handleLoad}
+      onzoom={trackZoomLimits}
+      onidle={signalReady}
+      onerror={handleError}
+      onclick={handleClick}
+      onmoveend={(ev) => emitView(!!(ev as { originalEvent?: unknown }).originalEvent)}
+    >
+      <AttributionControl customAttribution={ATTRIBUTION} compact />
 
-    {#if showFullscreen}
-      <FullScreenControl position="top-right" />
-    {/if}
-
-    {#if showLocate}
-      <GeolocateControl
-        position="top-right"
-        positionOptions={{ enableHighAccuracy: true }}
-        trackUserLocation
-        showAccuracyCircle
-        showUserLocation
-        showUserHeading
-      />
-    {/if}
-
-    {#if lineData}
-      <GeoJSONSource data={lineData} lineMetrics={lineProgress !== undefined}>
-        {#if lineUpcoming}
-          <!-- Listed first, so it is added first and the drawn line paints
-               over it wherever the two overlap. Faint, not dashed: a loading
-               frame drawn without the engine can match a solid line exactly,
-               but not where MapLibre's dashes fall, and the two would visibly
-               shift at the hand-off. -->
-          <LineLayer layout={LINE_LAYOUT} paint={UPCOMING_PAINT} />
-        {/if}
-        <LineLayer layout={LINE_LAYOUT} paint={linePaint} />
-      </GeoJSONSource>
-    {/if}
-
-    <!-- `promoteId` makes each feature's id its `mid`, which is what
-         `setFeatureState` addresses a pulse to. -->
-    <GeoJSONSource id={MARKERS_SOURCE} data={markerData} promoteId="mid">
-      {#if pulses}
-        <CircleLayer id={PULSE_LAYER} paint={pulsePaint(markerRadius)} />
-      {/if}
-      <CircleLayer
-        id={MARKERS_LAYER}
-        paint={{
-          "circle-radius": radius,
-          "circle-color": ["case", ["get", "dimmed"], "#9ca3af", ["get", "color"]],
-          "circle-opacity": ["case", ["get", "dimmed"], 0.45, 1],
-          "circle-stroke-width": strokeW,
-          "circle-stroke-color": "#fff",
-          "circle-stroke-opacity": ["case", ["get", "dimmed"], 0.45, 1],
-        }}
-        onmouseenter={() => interactive && setCursor("pointer")}
-        onmouseleave={() => setCursor("")}
-      />
-    </GeoJSONSource>
-
-    {#if runnerData}
-      <!-- Mounted after the markers so `beforeId` has a layer to slot in
-           front of: under the stops' dots, over their pulse rings. -->
-      <GeoJSONSource id={RUNNER_SOURCE} data={runnerData}>
-        <CircleLayer id={RUNNER_LAYER} beforeId={MARKERS_LAYER} paint={RUNNER_PAINT} />
-      </GeoJSONSource>
-    {/if}
-
-    {#each labeled as m (m.id)}
-      <Marker lnglat={[m.lon, m.lat]} style={{ pointerEvents: "none" }}>
-        {#snippet content()}
-          <!-- Keyed so a caller can replay the pop by changing `popKey`; the
-               keyframe runs on mount. -->
-          {#key m.popKey}
-            <span
-              class="marker-pop-label"
-              style="color:#fff; font-size:11px; font-weight:700; line-height:1; opacity:{m.dimmed
-                ? 0.45
-                : 1}; text-shadow:0 1px 1px rgba(0,0,0,.35);"
+      {#if cooperativeGestures}
+        <!-- View controls in place of MapLibre's flashing screen: with the wheel
+             handed to the page, these are the visible way to move the map.
+             Bottom-left is lifted clear of anything the page lays over the map's
+             lower edge by `--map-ctrl-inset-bottom`. -->
+        <CustomControl position="bottom-left" group={false} class="view-controls">
+          <div class="maplibregl-ctrl-group">
+            <button
+              type="button"
+              class="view-controls__reset"
+              title="Reset view"
+              aria-label="Reset view"
+              disabled={!interactive}
+              onclick={resetView}
             >
-              {m.label}
+              <ArrowCounterClockwise size={18} weight="bold" aria-hidden="true" />
+            </button>
+          </div>
+          <div class="maplibregl-ctrl-group">
+            <button
+              type="button"
+              class="maplibregl-ctrl-zoom-out"
+              title="Zoom out"
+              aria-label="Zoom out"
+              disabled={!interactive || atMinZoom}
+              onclick={() => map?.zoomOut({ around: visibleCentre(), duration: motionMs(300) })}
+            >
+              <span class="maplibregl-ctrl-icon" aria-hidden="true"></span>
+            </button>
+            <button
+              type="button"
+              class="maplibregl-ctrl-zoom-in"
+              title="Zoom in"
+              aria-label="Zoom in"
+              disabled={!interactive || atMaxZoom}
+              onclick={() => map?.zoomIn({ around: visibleCentre(), duration: motionMs(300) })}
+            >
+              <span class="maplibregl-ctrl-icon" aria-hidden="true"></span>
+            </button>
+          </div>
+        </CustomControl>
+      {/if}
+
+      {#if showFullscreen}
+        <FullScreenControl position="top-right" />
+      {/if}
+
+      {#if showLocate}
+        <GeolocateControl
+          position="top-right"
+          positionOptions={{ enableHighAccuracy: true }}
+          trackUserLocation
+          showAccuracyCircle
+          showUserLocation
+          showUserHeading
+        />
+      {/if}
+
+      {#if lineData}
+        <GeoJSONSource data={lineData} lineMetrics={lineProgress !== undefined}>
+          {#if lineUpcoming}
+            <!-- Listed first, so it is added first and the drawn line paints
+                 over it wherever the two overlap. Faint, not dashed: a loading
+                 frame drawn without the engine can match a solid line exactly,
+                 but not where MapLibre's dashes fall, and the two would visibly
+                 shift at the hand-off. -->
+            <LineLayer layout={LINE_LAYOUT} paint={UPCOMING_PAINT} />
+          {/if}
+          <LineLayer layout={LINE_LAYOUT} paint={linePaint} />
+        </GeoJSONSource>
+      {/if}
+
+      <!-- `promoteId` makes each feature's id its `mid`, which is what
+           `setFeatureState` addresses a pulse to. -->
+      <GeoJSONSource id={MARKERS_SOURCE} data={markerData} promoteId="mid">
+        {#if pulses}
+          <CircleLayer id={PULSE_LAYER} paint={pulsePaint(markerRadius)} />
+        {/if}
+        <CircleLayer
+          id={MARKERS_LAYER}
+          paint={{
+            "circle-radius": radius,
+            "circle-color": ["case", ["get", "dimmed"], "#9ca3af", ["get", "color"]],
+            "circle-opacity": ["case", ["get", "dimmed"], 0.45, 1],
+            "circle-stroke-width": strokeW,
+            "circle-stroke-color": "#fff",
+            "circle-stroke-opacity": ["case", ["get", "dimmed"], 0.45, 1],
+          }}
+          onmouseenter={() => interactive && setCursor("pointer")}
+          onmouseleave={() => setCursor("")}
+        />
+      </GeoJSONSource>
+
+      {#if runnerData}
+        <!-- Mounted after the markers so `beforeId` has a layer to slot in
+             front of: under the stops' dots, over their pulse rings. -->
+        <GeoJSONSource id={RUNNER_SOURCE} data={runnerData}>
+          <CircleLayer id={RUNNER_LAYER} beforeId={MARKERS_LAYER} paint={RUNNER_PAINT} />
+        </GeoJSONSource>
+      {/if}
+
+      {#each labeled as m (m.id)}
+        <Marker lnglat={[m.lon, m.lat]} style={{ pointerEvents: "none" }}>
+          {#snippet content()}
+            <!-- Keyed so a caller can replay the pop by changing `popKey`; the
+                 keyframe runs on mount. -->
+            {#key m.popKey}
+              <span
+                {@attach hideMarkerFromAT}
+                class="marker-pop-label"
+                style="color:#fff; font-size:11px; font-weight:700; line-height:1; opacity:{m.dimmed
+                  ? 0.45
+                  : 1}; text-shadow:0 1px 1px rgba(0,0,0,.35);"
+              >
+                {m.label}
+              </span>
+            {/key}
+          {/snippet}
+        </Marker>
+      {/each}
+
+      {#if beckonMarker}
+        <!-- Mounted after the labels, so drawn over them: the wave is masked
+             clear of the dot and its label (see `.beckon-wave`). -->
+        <Marker lnglat={[beckonMarker.lon, beckonMarker.lat]} style={{ pointerEvents: "none" }}>
+          {#snippet content()}
+            <span {@attach hideMarkerFromAT} class="beckon" style={beckonStyle} aria-hidden="true">
+              <span class="beckon-wave"></span>
             </span>
-          {/key}
-        {/snippet}
-      </Marker>
-    {/each}
+          {/snippet}
+        </Marker>
+      {/if}
 
-    {#if beckonMarker}
-      <!-- Mounted after the labels, so drawn over them: the wave is masked
-           clear of the dot and its label (see `.beckon-wave`). -->
-      <Marker lnglat={[beckonMarker.lon, beckonMarker.lat]} style={{ pointerEvents: "none" }}>
-        {#snippet content()}
-          <span class="beckon" style={beckonStyle} aria-hidden="true">
-            <span class="beckon-wave"></span>
-          </span>
-        {/snippet}
-      </Marker>
-    {/if}
+      {#if start}
+        <!-- Anchored at its centre by the marker, then shifted so the base of
+             the pole is on the point (see `START_FLAG.pole`). -->
+        <Marker lnglat={[start[1], start[0]]} style={{ pointerEvents: "none" }}>
+          {#snippet content()}
+            <span
+              {@attach hideMarkerFromAT}
+              class="marker-pop-label start-flag"
+              style="--flag-color: {START_FLAG.color}; --flag-dx: {START_FLAG.px *
+                (0.5 - START_FLAG.pole.x)}px; --flag-dy: {START_FLAG.px *
+                (0.5 - START_FLAG.pole.y)}px;"
+              aria-hidden="true"
+            >
+              <FlagIcon size={START_FLAG.px} weight="fill" />
+            </span>
+          {/snippet}
+        </Marker>
+      {/if}
 
-    {#if start}
-      <!-- Anchored at its centre by the marker, then shifted so the base of
-           the pole is on the point (see `START_FLAG.pole`). -->
-      <Marker lnglat={[start[1], start[0]]} style={{ pointerEvents: "none" }}>
-        {#snippet content()}
-          <span
-            class="marker-pop-label start-flag"
-            style="--flag-color: {START_FLAG.color}; --flag-dx: {START_FLAG.px *
-              (0.5 - START_FLAG.pole.x)}px; --flag-dy: {START_FLAG.px *
-              (0.5 - START_FLAG.pole.y)}px;"
-            aria-hidden="true"
+      {#if selectedMarker && markerPopup && !selectedMarker.noPopup}
+        <!-- Keyed on the side the card opens on, because `anchor` is a
+          construction-time option: `svelte-maplibre-gl` passes it into
+          `new maplibregl.Popup(...)` once and never again (there is no setter to
+          pass it to), so a plain prop change is silently dropped and every popup
+          after the first keeps the first one's side — the map's own popup
+          instance is reused as the selection moves from marker to marker. The
+          key makes the side a real change: a new Popup, built with it.
+          `selected` is in the key too, so a fresh marker also gets a fresh pop-in
+          rather than the card sliding across the map. -->
+        {#key `${selected}:${popupAnchor}`}
+          <!-- `focusAfterOpen={false}`: MapLibre otherwise focuses the popup's
+            first focusable element the moment it opens (its default), which drops
+            a focus ring on the first action button of a popup the visitor just
+            tapped. The card opens under the pointer and is already where they are
+            looking, so the move buys nothing and the ring reads as a stray
+            selection. Tab order still reaches the card — it is in the DOM after
+            the markers. -->
+          <Popup
+            lnglat={[selectedMarker.lon, selectedMarker.lat]}
+            anchor={popupAnchor}
+            offset={POPUP_OFFSET_PX}
+            closeOnClick={false}
+            closeButton={false}
+            maxWidth="none"
+            focusAfterOpen={false}
+            onclose={() => (selected = null)}
           >
-            <FlagIcon size={START_FLAG.px} weight="fill" />
-          </span>
-        {/snippet}
-      </Marker>
-    {/if}
-
-    {#if selectedMarker && markerPopup && !selectedMarker.noPopup}
-      <!-- Keyed on the side the card opens on, because `anchor` is a
-        construction-time option: `svelte-maplibre-gl` passes it into
-        `new maplibregl.Popup(...)` once and never again (there is no setter to
-        pass it to), so a plain prop change is silently dropped and every popup
-        after the first keeps the first one's side — the map's own popup
-        instance is reused as the selection moves from marker to marker. The
-        key makes the side a real change: a new Popup, built with it.
-        `selected` is in the key too, so a fresh marker also gets a fresh pop-in
-        rather than the card sliding across the map. -->
-      {#key `${selected}:${popupAnchor}`}
-        <!-- `focusAfterOpen={false}`: MapLibre otherwise focuses the popup's
-          first focusable element the moment it opens (its default), which drops
-          a focus ring on the first action button of a popup the visitor just
-          tapped. The card opens under the pointer and is already where they are
-          looking, so the move buys nothing and the ring reads as a stray
-          selection. Tab order still reaches the card — it is in the DOM after
-          the markers. -->
-        <Popup
-          lnglat={[selectedMarker.lon, selectedMarker.lat]}
-          anchor={popupAnchor}
-          offset={POPUP_OFFSET_PX}
-          closeOnClick={false}
-          closeButton={false}
-          maxWidth="none"
-          focusAfterOpen={false}
-          onclose={() => (selected = null)}
-        >
-          {@render markerPopup(selectedMarker)}
-        </Popup>
-      {/key}
-    {/if}
-  </MapLibre>
+            {@render markerPopup(selectedMarker)}
+          </Popup>
+        {/key}
+      {/if}
+    </MapLibre>
+  </svelte:boundary>
 </div>
 
 <style>
@@ -1539,6 +1670,12 @@
   }
   .beckon-wave::after {
     animation-delay: 200ms;
+  }
+  /* Held mid-beat while the map is scrolled out of view (`offscreen`). Both
+     waves pause and resume together, so the pair keeps its spacing. */
+  .map-view-root[data-offscreen] .beckon-wave::before,
+  .map-view-root[data-offscreen] .beckon-wave::after {
+    animation-play-state: paused;
   }
   /* Both run 2.08s — the 200ms between the waves, a wave's 1.8s trip, and an
      80ms rest — with the trip in the first 86.54%, held gone for the rest;

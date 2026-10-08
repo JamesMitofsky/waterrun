@@ -1,20 +1,20 @@
 import type { ExpoConfig } from "expo/config";
 
-// Shared identity from @rosm/core. A relative require (not a package import) keeps
+// Shared identity from @water-run/core. A relative require (not a package import) keeps
 // the Expo config loader happy across the pnpm workspace symlink.
-const rosm = require("../../packages/core/appConfig.json");
+const cfg = require("../../packages/core/appConfig.json");
 
 const config: ExpoConfig = {
-  name: rosm.appName,
-  slug: "rosm",
+  name: cfg.appName,
+  slug: "water-run",
   version: "1.0.0",
-  scheme: rosm.scheme, // registers rosm:// for the OSM OAuth deep-link callback
+  scheme: cfg.scheme, // registers waterrun:// for the OSM OAuth deep-link callback
   orientation: "portrait",
   icon: "./assets/icon.png",
   userInterfaceStyle: "light",
   ios: {
     supportsTablet: false,
-    bundleIdentifier: rosm.appId,
+    bundleIdentifier: cfg.appId,
     infoPlist: {
       ITSAppUsesNonExemptEncryption: false,
       // Background location so a run keeps tracking with the screen locked.
@@ -26,7 +26,7 @@ const config: ExpoConfig = {
     },
   },
   android: {
-    package: rosm.appId,
+    package: cfg.appId,
     permissions: ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION", "ACCESS_BACKGROUND_LOCATION"],
   },
   plugins: [
@@ -59,9 +59,9 @@ const config: ExpoConfig = {
     ],
   ],
   experiments: { typedRoutes: true },
-  extra: {
-    eas: { projectId: "a80cccc0-d7d5-46b3-aaa7-77d843699b6c" },
-  },
+  // No EAS project yet: the old one was bound to the slug "rosm". Run `eas init`
+  // (logged in) once to create the water-run project; it writes
+  // extra.eas.projectId here.
 };
 
 export default config;

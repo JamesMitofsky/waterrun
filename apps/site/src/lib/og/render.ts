@@ -43,7 +43,7 @@ const scrim = Buffer.from(
     `</svg>`,
 );
 
-export async function renderOgPng(): Promise<Buffer> {
+export async function renderOgImage(): Promise<Buffer> {
   const background = await sharp(basemap)
     .resize(OG_SIZE.width, OG_SIZE.height, { fit: "cover" })
     .blur(BLUR)
@@ -52,11 +52,17 @@ export async function renderOgPng(): Promise<Buffer> {
 
   const wordmark = await sharp(logo).resize({ width: LOGO_WIDTH }).toBuffer();
 
+  // JPEG, not PNG: the card is a blurred photograph of a map, the worst case
+  // for PNG (570 KB as RGBA) and an easy one for JPEG (~70 KB), and share
+  // previews (WhatsApp is the usual example) drop images much past 300 KB.
+  // The card is opaque, so JPEG's lack of alpha costs nothing; `flatten`
+  // settles anything transparent on white rather than the encoder's black.
   return sharp(background)
     .composite([
       { input: scrim, top: 0, left: 0 },
       { input: wordmark, gravity: "centre" },
     ])
-    .png()
+    .flatten({ background: "#ffffff" })
+    .jpeg({ quality: 85, mozjpeg: true })
     .toBuffer();
 }

@@ -1,7 +1,7 @@
 import type { ComponentType } from "react";
 import { Pressable, Text, View } from "react-native";
-import { User } from "phosphor-react-native";
-import type { Audience } from "@rosm/core/schemas";
+import { UserIcon } from "phosphor-react-native/src/icons/User";
+import type { Audience } from "@water-run/core/schemas";
 import { DogIcon } from "./icons/DogIcon";
 import { BothAudienceIcon } from "./icons/BothAudienceIcon";
 
@@ -10,7 +10,7 @@ const OPTIONS: readonly {
   label: string;
   Icon: ComponentType<{ size?: number; color?: string }>;
 }[] = [
-  { key: "humans", label: "Humans", Icon: User },
+  { key: "humans", label: "Humans", Icon: UserIcon },
   { key: "both", label: "Both", Icon: BothAudienceIcon },
   { key: "dogs", label: "Dogs", Icon: DogIcon },
 ];

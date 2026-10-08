@@ -1,9 +1,9 @@
 <script lang="ts">
   import MapView, { pulseVisibleAt, type MapMarker } from "@/components/MapView.svelte";
   import PointPopup, { type PointEdit } from "@/components/PointPopup.svelte";
-  import type { EditAction, EditExtras, Fountain } from "@rosm/core/schemas";
-  import type { StopStatus } from "@rosm/core/stores/run";
-  import { editSummary, todayLocal } from "@rosm/core/editSummary";
+  import type { EditAction, EditExtras, Fountain } from "@water-run/core/schemas";
+  import type { StopStatus } from "@water-run/core/stores/run";
+  import { editSummary, todayLocal } from "@water-run/core/editSummary";
   import { celebratePoint } from "@/lib/confetti";
   import { openingViewForViewport } from "@/lib/basemap/frames";
   import {

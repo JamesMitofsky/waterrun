@@ -1,1 +1,1 @@
-export * from "@rosm/core/dispenser";
+export * from "@water-run/core/dispenser";

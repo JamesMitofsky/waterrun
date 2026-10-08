@@ -1,5 +1,5 @@
 import { Pressable, Text, View } from "react-native";
-import type { Dispenser } from "@rosm/core/schemas";
+import type { Dispenser } from "@water-run/core/schemas";
 import { BubblerIcon, BothDispenserIcon, BottleIcon } from "./icons/DispenserIcons";
 
 const OPTIONS: readonly {

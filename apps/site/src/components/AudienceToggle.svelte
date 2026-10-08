@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { User } from "phosphor-svelte";
-  import type { Audience } from "@rosm/core/schemas";
+  import UserIcon from "phosphor-svelte/lib/UserIcon";
+  import type { Audience } from "@water-run/core/schemas";
   import DogIcon from "@/components/icons/DogIcon.svelte";
   import BothAudienceIcon from "@/components/icons/BothAudienceIcon.svelte";
 
   const OPTIONS = [
-    { key: "humans", label: "Humans", Icon: User },
+    { key: "humans", label: "Humans", Icon: UserIcon },
     { key: "both", label: "Both", Icon: BothAudienceIcon },
     { key: "dogs", label: "Dogs", Icon: DogIcon },
   ] as const;

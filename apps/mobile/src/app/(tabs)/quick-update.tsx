@@ -1,18 +1,26 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, Text, useWindowDimensions, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { useIsFocused } from "expo-router";
 import { SafeArea } from "../../components/ui/SafeArea";
-import type { Fountain, EditExtras } from "@rosm/core/schemas";
-import type { StopStatus } from "@rosm/core/stores/run";
-import { milesToMeters, haversine, boundsCenter, boundsRadiusM, type Pt } from "@rosm/core/geo";
-import { useOutbox } from "@rosm/core/stores/outbox";
-import { EDIT_COLOR, EDIT_LABEL } from "@rosm/core/editStatus";
-import { fountainDotStyle } from "@rosm/core/fountainFilters";
+import type { Fountain, EditExtras } from "@water-run/core/schemas";
+import type { StopStatus } from "@water-run/core/stores/run";
+import {
+  milesToMeters,
+  haversine,
+  boundsCenter,
+  boundsRadiusM,
+  type Pt,
+} from "@water-run/core/geo";
+import { useOutbox } from "@water-run/core/stores/outbox";
+import { EDIT_COLOR, EDIT_LABEL } from "@water-run/core/editStatus";
+import { fountainDotStyle } from "@water-run/core/fountainFilters";
+import { shouldRefineSearch } from "@water-run/core/locate";
 import { api } from "../../ports/api";
-import { geolocation } from "../../ports/geolocation";
+import { locateFast } from "../../ports/locateFast";
 import { celebratePoint } from "../../ports/confetti";
 import { hapticSuccess } from "../../ports/haptics";
-import { BottomSheet, RNHostView } from "@expo/ui";
-import { RosmMap, type RosmMarker, type RosmRegion } from "../../map/RosmMap";
+import { PointSheetHost } from "../../components/ui/PointSheetHost";
+import { WaterRunMap, type MapMarker, type MapRegion } from "../../map/WaterRunMap";
 import { PointSheet, type PointEdit, type SurveyAction } from "../../components/PointSheet";
 
 const TAG = { key: "amenity", value: "drinking_water" };
@@ -28,7 +36,7 @@ type Search = { center: Pt; radiusM: number };
 
 // True once the viewport has panned/zoomed far enough from the last search that
 // re-querying would surface different fountains.
-function movedEnough(region: RosmRegion, last: Search): boolean {
+function movedEnough(region: MapRegion, last: Search): boolean {
   const c = boundsCenter(region.bounds);
   const r = Math.min(boundsRadiusM(region.bounds), MAX_RADIUS_M);
   const panned = haversine(c, last.center) > last.radiusM * REQUERY_FRACTION;
@@ -40,9 +48,6 @@ function movedEnough(region: RosmRegion, last: Search): boolean {
 // via the outbox). Pan/zoom the map, then "Search this area" re-queries the visible
 // viewport — so zooming out searches a wider region. No routing.
 export default function QuickUpdate() {
-  // Sheet content width: full window minus the sheet's 16px horizontal padding
-  // on each side (a percentage width doesn't resolve inside the native host).
-  const { width: winW } = useWindowDimensions();
   // Snapshot the clock once for the dot recency coloring — it needn't tick live.
   const [now] = useState(() => Date.now());
   const [center, setCenter] = useState<Pt | null>(null);
@@ -50,7 +55,7 @@ export default function QuickUpdate() {
   // Track the tapped point by id, not the resolved object — the sheet opens the
   // instant this is set (before the fountain is looked up), so it never waits on
   // content. `selected` is derived; a null derive shows the sheet's spinner.
-  const [selectedId, setSelectedId] = useState<RosmMarker["id"] | null>(null);
+  const [selectedId, setSelectedId] = useState<MapMarker["id"] | null>(null);
   // Points updated this session, keyed by node id, derived from the outbox so
   // the sheet can show the recorded state + live sync status.
   const outboxItems = useOutbox((s) => s.items);
@@ -70,10 +75,18 @@ export default function QuickUpdate() {
   const [err, setErr] = useState<string | null>(null);
   // Where/how wide the current markers were fetched, and the live viewport.
   const [lastSearch, setLastSearch] = useState<Search | null>(null);
-  const [region, setRegion] = useState<RosmRegion | null>(null);
+  const [region, setRegion] = useState<MapRegion | null>(null);
+  // Bumped to move the map to `center` when a fresh fix corrects the first one.
+  const [recenterKey, setRecenterKey] = useState(0);
+  // The map only draws the device's location while this tab is on screen.
+  const isFocused = useIsFocused();
 
+  // Only the latest search may show its results: the search made from a
+  // fresh fix can overlap the one made from the first.
+  const searchSeq = useRef(0);
   const search = useCallback(async ({ center: c, radiusM }: Search) => {
     const capped = Math.min(radiusM, MAX_RADIUS_M);
+    const seq = ++searchSeq.current;
     setBusy(true);
     setErr(null);
     setSelectedId(null);
@@ -91,34 +104,59 @@ export default function QuickUpdate() {
         }),
       });
       const j = await r.json();
+      if (seq !== searchSeq.current) return;
       if (!r.ok) throw new Error(j.error?.message ?? "Couldn't load fountains.");
       setFountains(j.fountains as Fountain[]);
       setLastSearch({ center: c, radiusM: capped });
     } catch (e) {
-      setErr((e as Error).message);
+      if (seq === searchSeq.current) setErr((e as Error).message);
     } finally {
-      setBusy(false);
+      if (seq === searchSeq.current) setBusy(false);
     }
   }, []);
 
-  const load = useCallback(async () => {
-    setBusy(true);
-    setErr(null);
-    try {
-      const pos = await geolocation.getCurrentPosition();
-      setCenter(pos);
-      await search({ center: pos, radiusM: milesToMeters(RADIUS_MI) });
-    } catch (e) {
-      setErr((e as Error).message);
-      setBusy(false);
-    }
-  }, [search]);
-
+  // Once the user has moved the map or opened a point, they are using what's
+  // on screen, and a fresh fix no longer redoes the search under them. A move
+  // counts from the moment it starts: `region` only arrives once the map
+  // settles, after any fling, and a fix landing before then would recenter
+  // the map in the middle of the gesture.
+  const userActed = useRef(false);
+  const onUserMove = () => {
+    userActed.current = true;
+  };
   useEffect(() => {
-    // Fetch-on-mount: load() only setStates after awaits (locate + fetch).
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    load();
-  }, [load]);
+    if (region != null || selectedId != null) userActed.current = true;
+  }, [region, selectedId]);
+
+  // Open on the phone's recent fix at once, rather than a spinner for the
+  // whole GPS wait, and search there. The fresh fix then redoes the search
+  // only if it lands far enough away to change what's found.
+  useEffect(() => {
+    const radiusM = milesToMeters(RADIUS_MI);
+    let searchedFrom: Pt | null = null;
+    return locateFast(
+      ({ pos }) => {
+        if (searchedFrom) {
+          const refine = shouldRefineSearch({
+            searchedFrom,
+            radiusM,
+            fresh: pos,
+            fraction: REQUERY_FRACTION,
+            userActed: userActed.current,
+          });
+          if (!refine) return;
+          setRecenterKey((k) => k + 1);
+        }
+        searchedFrom = pos;
+        setCenter(pos);
+        void search({ center: pos, radiusM });
+      },
+      (e) => {
+        setErr(e instanceof Error ? e.message : String(e));
+        setBusy(false);
+      },
+    );
+  }, [search]);
 
   // Offer a re-query only once the map has moved meaningfully from the results.
   const canRequery =
@@ -144,7 +182,7 @@ export default function QuickUpdate() {
   // Memoized so an unrelated re-render doesn't rebuild the whole array and
   // re-diff the GeoJSON source to the native map. Only recomputes when the
   // inputs that actually affect a dot change.
-  const markers: RosmMarker[] = useMemo(
+  const markers: MapMarker[] = useMemo(
     () =>
       fountains.map((f) => {
         const edit = edits[f.id];
@@ -180,12 +218,14 @@ export default function QuickUpdate() {
   return (
     <View className="bg-surface flex-1">
       {center ? (
-        <RosmMap
+        <WaterRunMap
           center={[center.lat, center.lon]}
           markers={markers}
-          userPos={[center.lat, center.lon]}
-          initialOnly
+          showUserLocation={isFocused}
+          recenterKey={String(recenterKey)}
+          animateRecenter
           onRegionChange={setRegion}
+          onUserMove={onUserMove}
           onMarkerPress={setSelectedId}
         />
       ) : (
@@ -235,33 +275,22 @@ export default function QuickUpdate() {
       ) : null}
 
       {/* Native OS bottom sheet (SwiftUI / Jetpack Compose via @expo/ui). The
-          gesture + spring run off the JS thread; PointSheet stays plain RN,
-          bridged in through RNHostView. */}
-      {/* No snapPoints → iOS fitToContents / Android intrinsic height: the sheet
-          hugs its content instead of opening to a fixed (over-tall) detent that
-          leaves the card floating mid-screen. */}
-      <BottomSheet isPresented={selectedId != null} onDismiss={() => setSelectedId(null)}>
-        {/* matchContents sizes the host to its child's *intrinsic* size and
-            ignores an explicit width on the host itself. So the explicit width
-            goes on the child: intrinsic width becomes full sheet width (window −
-            the sheet's 16px L/R padding), and matchContents wraps to it. */}
-        <RNHostView matchContents>
-          <View style={{ width: winW - 32 }}>
-            {selected ? (
-              <PointSheet
-                fountain={selected}
-                edit={edits[selected.id]}
-                onAction={(action, extras) => record(selected, action, extras)}
-              />
-            ) : (
-              // Sheet opened instantly on tap; spin until the point resolves.
-              <View className="items-center justify-center py-12">
-                <ActivityIndicator />
-              </View>
-            )}
+          gesture + spring run off the JS thread; PointSheet stays plain RN.
+          PointSheetHost owns the sizing workaround and the keyboard. */}
+      <PointSheetHost isPresented={selectedId != null} onDismiss={() => setSelectedId(null)}>
+        {selected ? (
+          <PointSheet
+            fountain={selected}
+            edit={edits[selected.id]}
+            onAction={(action, extras) => record(selected, action, extras)}
+          />
+        ) : (
+          // Sheet opened instantly on tap; spin until the point resolves.
+          <View className="items-center justify-center py-12">
+            <ActivityIndicator />
           </View>
-        </RNHostView>
-      </BottomSheet>
+        )}
+      </PointSheetHost>
     </View>
   );
 }

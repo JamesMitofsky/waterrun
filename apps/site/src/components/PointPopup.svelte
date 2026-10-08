@@ -1,7 +1,7 @@
 <script module lang="ts">
-  import type { EditExtras } from "@rosm/core/schemas";
-  import type { StopStatus } from "@rosm/core/stores/run";
-  import type { SyncState } from "@rosm/core/stores/outbox";
+  import type { EditExtras } from "@water-run/core/schemas";
+  import type { StopStatus } from "@water-run/core/stores/run";
+  import type { SyncState } from "@water-run/core/stores/outbox";
 
   // Local feedback for a point already updated in this session. The edit is saved
   // on-device first; changesetUrl only exists once OSM accepts it.
@@ -15,19 +15,17 @@
 </script>
 
 <script lang="ts">
-  import {
-    CheckCircle,
-    MinusCircle,
-    PlusCircle,
-    Snowflake,
-    Trash,
-    Warning,
-    Wrench,
-  } from "phosphor-svelte";
+  import CheckCircle from "phosphor-svelte/lib/CheckCircle";
+  import MinusCircle from "phosphor-svelte/lib/MinusCircle";
+  import PlusCircle from "phosphor-svelte/lib/PlusCircle";
+  import Snowflake from "phosphor-svelte/lib/Snowflake";
+  import Trash from "phosphor-svelte/lib/Trash";
+  import Warning from "phosphor-svelte/lib/Warning";
+  import Wrench from "phosphor-svelte/lib/Wrench";
   import DogIcon from "@/components/icons/DogIcon.svelte";
   import { getMapPopup } from "@/lib/mapPopup";
-  import type { Fountain, EditAction } from "@rosm/core/schemas";
-  import { checkedAgoLabel } from "@rosm/core/checkDate";
+  import type { Fountain, EditAction } from "@water-run/core/schemas";
+  import { checkedAgoLabel } from "@water-run/core/checkDate";
   import PointDetailsForm from "@/components/PointDetailsForm.svelte";
   import OsmSignInLink from "@/components/OsmSignInLink.svelte";
   import SyncBadge from "@/components/SyncBadge.svelte";
@@ -77,8 +75,15 @@
     onToggleRoute?: () => void;
   } = $props();
 
-  const { close } = getMapPopup();
+  const { close, holdOpen } = getMapPopup();
   let detailFor = $state<DetailAction | null>(null);
+  // The detail step is a draft — a status picked, maybe a note half typed — so
+  // a tap on the map only lowers the keyboard while it is open (see
+  // `holdOpen`). Cancel and submit leave it as before.
+  $effect(() => {
+    holdOpen(detailFor !== null);
+    return () => holdOpen(false);
+  });
   // Snapshot the clock once — the "checked ago" label doesn't need to tick live.
   const now = Date.now();
 </script>

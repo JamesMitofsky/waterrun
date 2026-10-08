@@ -10,7 +10,7 @@
  * copies to keep in step; both read this one.
  */
 
-import type { StopStatus } from "@rosm/core/stores/run";
+import type { StopStatus } from "@water-run/core/stores/run";
 import { DC_FOUNTAINS, DC_ROUTE, DEMO_NEXT_STOP, SEED_STATUSES } from "./demoRoute";
 import { arrivalLengths, pointAt, routeLengths, routePrefix, type Route } from "./routeProgress";
 

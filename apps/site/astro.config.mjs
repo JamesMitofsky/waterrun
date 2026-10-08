@@ -30,6 +30,9 @@ export default defineConfig({
   // shared links — is told to update it rather than follow it every time.
   redirects: {
     "/dc-drinking-fountains": { status: 301, destination: "/public-drinking-fountains" },
+    // The social card was a PNG; previews cached before it became a JPEG may
+    // still ask for the old URL.
+    "/opengraph-image.png": { status: 301, destination: "/opengraph-image.jpg" },
   },
   vite: {
     plugins: [tailwindcss()],
@@ -38,7 +41,8 @@ export default defineConfig({
     // which silently dropped `backdrop-filter` from the map frames' frosted
     // glass in every build, so Firefox rendered them unblurred. Given targets
     // it keeps both, and adds prefixes the floor needs but the source omits.
-    // Safari 15 is the floor because the iOS app ships through Capacitor.
+    // The floor is the oldest browsers the site supports for its visitors;
+    // Safari 15 (iOS 15) is among them and still needs -webkit-backdrop-filter.
     build: {
       cssTarget: ["chrome110", "firefox115", "safari15", "edge110"],
       // The header nav's current-page mask must ride inside the stylesheet as

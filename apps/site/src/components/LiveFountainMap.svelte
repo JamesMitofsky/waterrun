@@ -4,23 +4,23 @@
   import FountainPopup from "@/components/fountains/FountainPopup.svelte";
   import SearchProgress, { type LoadingStep } from "@/components/fountains/SearchProgress.svelte";
   import ErrorNotice from "@/components/ErrorNotice.svelte";
-  import type { Fountain } from "@rosm/core/schemas";
-  import { isOutOfService } from "@rosm/core/fountainFilters";
-  import { apiFetch, ApiTimeoutError } from "@/lib/api";
-  import { haversine } from "@rosm/core/geo";
+  import type { Fountain } from "@water-run/core/schemas";
+  import { isOutOfService } from "@water-run/core/fountainFilters";
+  import { fetchRegionFountains, fountainLoadErrorMessage } from "@/lib/regionFountains";
+  import { haversine } from "@water-run/core/geo";
 
-  // Live counterpart to DemoRunMap: on mount it queries Overpass for every
-  // amenity=drinking_water node in the on-screen viewport around central DC and
-  // colors each by how recently it was verified. Read-only; no editing.
+  // Live counterpart to DemoRunMap: every drinking-water point in a fixed area
+  // around central DC, colored by how recently it was verified. Read-only; no
+  // editing.
   let { class: className = "" }: { class?: string } = $props();
 
-  // Hard client-side ceiling for the fountain fetch. The backend keeps trying
-  // Overpass mirrors well past this; the user shouldn't wait longer than 20s.
+  // Hard client-side ceiling for the fountain fetch. The server gives up on
+  // Overpass sooner than this and says so; this is for a connection that
+  // stalls and says nothing.
   const FETCH_TIMEOUT_MS = 20_000;
 
   const DC_CENTER: [number, number] = [38.8972, -77.0369];
   const CENTER_PT = { lat: DC_CENTER[0], lon: DC_CENTER[1] };
-  const TAG = { key: "amenity", value: "drinking_water" } as const;
 
   // Location-specific play-by-play for the hero fetch.
   const LOADING_STEPS: LoadingStep[] = [
@@ -30,7 +30,8 @@
   ];
 
   let fountains = $state<Fountain[]>([]);
-  let busy = $state(true);
+  // A load is under way, from the request until its fountains are on the map.
+  let busy = $state(false);
   // The last fetch's error, if any. Rendering is deferred (see `showErr`) so a
   // flash — from navigating away, an unmount, or a superseded load — never
   // reaches the screen.
@@ -49,72 +50,51 @@
     return () => mq.removeEventListener("change", sync);
   });
 
-  // The visible viewport rectangle, kept fresh by MapView's onViewChange so the
-  // query uses the exact bounding box on screen — no radius.
-  let boundsRef: [[number, number], [number, number]] | null = null;
+  // MapView's error card is up (`onError`). The loader steps aside for it
+  // rather than frosting over it, and comes back if the map turns up after
+  // all — a map that only timed out loads late, and its fountains with it.
+  let mapFailed = $state(false);
+
+  // Settles when MapView reports a real load over a usable basemap, however
+  // late that is (a background tab only loads once it is shown).
+  let markMapLoaded!: () => void;
+  const mapLoaded = new Promise<void>((resolve) => (markMapLoaded = resolve));
 
   async function load() {
-    const box = boundsRef;
-    if (!box) return;
     busy = true;
     err = null;
     try {
-      const r = await apiFetch(
-        "/api/fountains",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            // [south, west, north, east] — the on-screen bounding box.
-            bounds: [box[0][0], box[0][1], box[1][0], box[1][1]],
-            tag: TAG,
-            recencyMode: "any",
-            includeDisused: true,
-          }),
-        },
-        // The server may retry Overpass across mirrors for far longer than a
-        // user should stare at a spinner — cap the wait and surface an error.
-        { timeoutMs: FETCH_TIMEOUT_MS },
-      );
-      const j = await r.json();
-      if (!r.ok) {
-        const e = j.error;
-        throw new Error(
-          e?.message || (typeof e === "string" ? e : "") || "Couldn't load fountains.",
-        );
-      }
-      const found = j.fountains as Fountain[];
+      const found = await fetchRegionFountains("dc", { timeoutMs: FETCH_TIMEOUT_MS });
+      // Held for the map, so the dots — and the refit to them — land on a map
+      // the visitor can see, as they did when the request waited for it.
+      await mapLoaded;
       nowMs = Date.now();
       fountains = found;
       // Refit to the returned points' bounding box.
       recenterKey = `loaded-${found.length}`;
     } catch (e) {
-      // Record whatever went wrong; `showErr` decides if it's worth showing.
-      err =
-        e instanceof ApiTimeoutError
-          ? "The fountain search took too long to respond. Please try again."
-          : (e as Error).message;
+      // Record whatever went wrong, in words meant for the visitor; `showErr`
+      // decides if it's worth showing.
+      err = fountainLoadErrorMessage(e);
     } finally {
       busy = false;
     }
   }
 
-  // Query once, the first time the map reports a settled viewport (MapView emits
-  // this on load, before any movement).
-  let didQuery = false;
-  function onViewChange(view: { bounds: [[number, number], [number, number]] }) {
-    boundsRef = view.bounds;
-    if (didQuery) return;
-    didQuery = true;
-    load();
+  // Ask straight away, alongside the map rather than after it. The area is
+  // fixed — nothing in the request depends on the map's view — so there is
+  // nothing to wait for: the request runs while the map fetches its tiles and
+  // draws its first frame, and with the CDN holding the reply it is often
+  // back first.
+  load();
+
+  function onMapLoad() {
+    mapFailed = false;
+    markMapLoaded();
   }
 
-  // The map failed before it could report a viewport, so the fountain query
-  // never fires. Stop the loader (MapView shows its own error card) instead of
-  // spinning forever behind it.
   function onMapError() {
-    didQuery = true;
-    busy = false;
+    mapFailed = true;
   }
 
   const buckets = $derived(fountains.map((f) => ({ f, bucket: bucketOf(f.tags, nowMs) })));
@@ -141,7 +121,7 @@
     return byDist.slice(0, keep).map(({ m }) => [m.lat, m.lon]);
   });
 
-  const loading = $derived(busy && fountains.length === 0);
+  const loading = $derived(busy && !mapFailed && fountains.length === 0);
   const succeeded = $derived(!busy && !err && fountains.length > 0);
 
   // Defer showing the error. A genuine failure sits still and crosses the delay;
@@ -169,7 +149,7 @@
     interactive
     showLocate
     showFullscreen
-    {onViewChange}
+    onLoad={onMapLoad}
     onError={onMapError}
     {markers}
     markerRadius={6}
