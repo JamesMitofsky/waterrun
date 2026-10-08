@@ -64,6 +64,15 @@ const config: ExpoConfig = {
         imageWidth: 180,
       },
     ],
+    [
+      "expo-build-properties",
+      {
+        // Apps built with the iOS 27 SDK (Xcode 27) are killed at launch unless they
+        // adopt the UIScene life cycle. SDK 57 makes it opt-in; SDK 58+ does it by
+        // default, so drop this on upgrade. https://github.com/expo/expo/issues/46664
+        ios: { enableSceneSupport: true },
+      },
+    ],
   ],
   experiments: { typedRoutes: true },
   // No EAS project yet: the old one was bound to the slug "rosm". Run `eas init`
