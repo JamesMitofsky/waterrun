@@ -32,6 +32,10 @@ export function usePlannerDraftSync() {
       excludedIds: s.excludedIds,
       vias: s.vias,
       stops: s.stops,
+      // The routed order (vias included) and the direction the user chose, so
+      // a resumed route reverses with its vias instead of re-planning.
+      order: s.order,
+      reversed: s.reversed,
       line: s.line,
       distanceM: s.distanceM,
       turns: s.turns,
@@ -54,6 +58,8 @@ export function usePlannerDraftSync() {
       excludedIds: slice.excludedIds,
       vias: slice.vias,
       stops: slice.stops,
+      order: slice.order,
+      reversed: slice.reversed,
       line: slice.line,
       distanceM: slice.distanceM,
       turns: slice.turns,
