@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { editSummary, todayLocal } from "../src/editSummary";
+import { editSummary, localIsoDate, todayLocal } from "../src/editSummary";
 
 const T = "2026-01-02";
 
@@ -87,5 +87,13 @@ describe("todayLocal", () => {
     vi.setSystemTime(new Date("2026-07-04T22:30:00.000Z"));
     vi.stubEnv("TZ", "Australia/Sydney");
     expect(todayLocal()).toBe("2026-07-05");
+  });
+});
+
+describe("localIsoDate", () => {
+  it("gives the device's calendar day of any moment", () => {
+    vi.stubEnv("TZ", "America/New_York");
+    expect(localIsoDate(new Date("2026-03-01T03:00:00.000Z"))).toBe("2026-02-28");
+    expect(localIsoDate(new Date("2026-03-01T05:00:00.000Z"))).toBe("2026-03-01");
   });
 });

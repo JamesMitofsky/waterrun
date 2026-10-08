@@ -644,7 +644,12 @@ describe("hydrate", () => {
     storage.getAll.mockResolvedValueOnce([
       storedItem({ id: "b", createdAt: "2026-07-04T11:00:00.000Z", syncState: "sending" }),
       storedItem({ id: "a", createdAt: "2026-07-04T10:00:00.000Z", syncState: "sent" }),
-      storedItem({ id: "c", createdAt: "2026-07-04T12:00:00.000Z", syncState: "failed" }),
+      storedItem({
+        id: "c",
+        createdAt: "2026-07-04T12:00:00.000Z",
+        syncState: "failed",
+        serverFailures: 0,
+      }),
     ]);
     storage.getMeta.mockResolvedValueOnce(77);
 
@@ -668,7 +673,12 @@ describe("hydrate", () => {
         createdAt: "2026-06-20T11:00:00.000Z",
         syncState: "pending",
       }),
-      storedItem({ id: "old-failed", createdAt: "2026-06-20T12:00:00.000Z", syncState: "failed" }),
+      storedItem({
+        id: "old-failed",
+        createdAt: "2026-06-20T12:00:00.000Z",
+        syncState: "failed",
+        serverFailures: 0,
+      }),
       storedItem({ id: "new-sent", createdAt: "2026-07-01T10:00:00.000Z", syncState: "sent" }),
     ]);
 
@@ -690,6 +700,66 @@ describe("hydrate", () => {
     await expect(useOutbox.getState().hydrate()).resolves.toBeUndefined();
     expect(useOutbox.getState().hydrated).toBe(true);
     expect(useOutbox.getState().items).toEqual([item]);
+  });
+
+  it("keeps the queue when only the changeset id can't be read", async () => {
+    storage.getAll.mockResolvedValueOnce([storedItem({ id: "a" })]);
+    storage.getMeta.mockRejectedValueOnce(new SyntaxError("JSON Parse error: Unexpected EOF"));
+
+    await useOutbox.getState().hydrate();
+    expect(useOutbox.getState().hydrated).toBe(true);
+    expect(useOutbox.getState().items.map((i) => i.id)).toEqual(["a"]);
+    expect(useOutbox.getState().changesetId).toBeUndefined();
+  });
+
+  it("re-arms a recent edit the old outbox gave up on, with the day it was surveyed", async () => {
+    vi.stubEnv("TZ", "America/Los_Angeles");
+    // Rows from before resends were classified: no serverFailures, no surveyDate.
+    storage.getAll.mockResolvedValueOnce([
+      storedItem({
+        id: "offline",
+        syncState: "failed",
+        attempts: 1,
+        error: "Network request failed",
+        createdAt: "2026-07-04T02:30:00.000Z", // 7:30 pm on 3 July in Los Angeles
+      }),
+      storedItem({
+        id: "too-old",
+        syncState: "failed",
+        attempts: 1,
+        createdAt: "2026-05-01T19:00:00.000Z",
+      }),
+      // Refused under the new rules: stays failed.
+      storedItem({
+        id: "refused",
+        syncState: "failed",
+        attempts: 1,
+        serverFailures: 0,
+        surveyDate: "2026-07-04",
+        error: "node gone",
+        createdAt: "2026-07-04T20:00:00.000Z",
+      }),
+    ]);
+
+    await useOutbox.getState().hydrate();
+    const row = (id: string) => useOutbox.getState().items.find((i) => i.id === id);
+    const [offline, tooOld, refused] = ["offline", "too-old", "refused"].map(row);
+    expect(offline).toMatchObject({
+      syncState: "pending",
+      serverFailures: 0,
+      surveyDate: "2026-07-03",
+    });
+    expect(offline?.error).toBeUndefined();
+    expect(storage.put).toHaveBeenCalledWith(offline);
+    // Too old for the server to take its survey date, so not resent behind the user's back.
+    expect(tooOld).toMatchObject({ syncState: "failed", surveyDate: "2026-05-01" });
+    expect(refused).toMatchObject({ syncState: "failed", error: "node gone" });
+    expect(storage.put).not.toHaveBeenCalledWith(expect.objectContaining({ id: "refused" }));
+
+    apiFetchMock.mockImplementation(async () => accepted());
+    await useOutbox.getState().flush({ force: true });
+    expect(apiFetchMock).toHaveBeenCalledTimes(1);
+    expect(sentBody(0).surveyDate).toBe("2026-07-03");
   });
 
   it("tolerates a row without a creation time", async () => {

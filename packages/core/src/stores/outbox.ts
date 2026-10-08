@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { EditAction, EditExtras } from "../schemas";
-import { editSummary, todayLocal } from "../editSummary";
+import { editSummary, localIsoDate, todayLocal } from "../editSummary";
 import { corePorts } from "../configure";
 import { readApiJson, type ApiReply } from "../apiResponse";
 
@@ -38,6 +38,12 @@ const MAX_SERVER_FAILURES = 8;
 // hydrate() drops them.
 const SENT_RETENTION_MS = 7 * 24 * 60 * 60_000;
 
+// How recent a failed edit stored before resends were classified must be for
+// hydrate() to send it again by itself. The server takes a surveyDate up to 30
+// days back and stamps its own date on anything older, which would pass off an
+// old survey as a fresh check.
+const LEGACY_RESEND_MAX_AGE_MS = 28 * 24 * 60 * 60_000;
+
 // One recorded modification. Saved to IndexedDB the instant the user acts, so the
 // confetti fires immediately and the edit survives a reload / offline period.
 export type OutboxItem = {
@@ -53,7 +59,9 @@ export type OutboxItem = {
   // they stood at the fountain, however late the edit reaches OSM.
   surveyDate?: string;
   attempts?: number; // sends tried so far (counted as each one starts)
-  serverFailures?: number; // server-side failures since enqueue or retryAll
+  // Server-side failures since enqueue or retryAll. Written by every failed
+  // send, so a failed row without it was stored before resends were classified.
+  serverFailures?: number;
   nextAttemptAt?: number; // epoch ms: backoff; only a forced flush sends sooner
   createdAt: string;
   holdUntil?: string; // ISO: flush skips the item until then (undo window)
@@ -156,6 +164,29 @@ function classify(reply: Extract<ApiReply<unknown>, { ok: false }>): "wait" | "r
   // readApiJson leaves `body` undefined only when the reply wasn't JSON.
   if (reply.body === undefined) return "retry";
   return reply.retryable ? "retry" : "fail";
+}
+
+// Bring a stored edit up to date on launch. A send cut off by the app closing
+// is tried again. A row from before edits carried surveyDate takes the
+// local day it was created, so a resend still stamps the day of the survey. A
+// failed row from before resends were classified most likely just never got
+// through (offline counted as failed for good then), so a recent one is re-armed;
+// the classifier fails it again quickly if the server really refuses it.
+function revive(row: OutboxItem, now: number): OutboxItem {
+  if (row.syncState === "sent") return row;
+  let item = row.syncState === "sending" ? { ...row, syncState: "pending" as const } : row;
+  const created = Date.parse(item.createdAt);
+  if (!item.surveyDate && Number.isFinite(created)) {
+    item = { ...item, surveyDate: localIsoDate(new Date(created)) };
+  }
+  if (
+    item.syncState === "failed" &&
+    item.serverFailures === undefined &&
+    now - created < LEGACY_RESEND_MAX_AGE_MS
+  ) {
+    item = { ...item, syncState: "pending", error: undefined, serverFailures: 0 };
+  }
+  return item;
 }
 
 export const useOutbox = create<OutboxState>((set, get, store) => {
@@ -290,30 +321,34 @@ export const useOutbox = create<OutboxState>((set, get, store) => {
     changesetId: undefined,
     hydrated: false,
 
-    // Load the queue from IndexedDB on app start. Any "sending" item is from a
-    // session that was interrupted mid-POST — reset it to pending so it retries.
-    // Sent items past their retention are dropped. Never throws: a queue that
-    // fails to load must not stop this session's edits from sending.
+    // Load the queue from IndexedDB on app start. Rows are brought up to date
+    // (see revive) and sent ones past their retention dropped. Never
+    // throws: a queue that fails to load must not stop this session's edits
+    // from sending.
     hydrate: async () => {
       if (get().hydrated) return;
       let stored: OutboxItem[] = [];
       let changesetId: number | undefined;
+      // Read separately, so an unreadable changeset id costs only the changeset
+      // (the next send opens a new one), never the queue.
       try {
-        [stored, changesetId] = await Promise.all([
-          corePorts().outboxStorage.getAll(),
-          corePorts().outboxStorage.getMeta<number>(CHANGESET_META),
-        ]);
+        stored = await corePorts().outboxStorage.getAll();
       } catch {
         // Unreadable storage: carry on with what is in memory.
       }
-      const cutoff = Date.now() - SENT_RETENTION_MS;
+      try {
+        changesetId = await corePorts().outboxStorage.getMeta<number>(CHANGESET_META);
+      } catch {
+        // Left undefined.
+      }
+      const now = Date.now();
       const byId = new Map<string, OutboxItem>();
       for (const row of stored) {
-        if (row.syncState === "sent" && Date.parse(row.createdAt) < cutoff) {
+        if (row.syncState === "sent" && Date.parse(row.createdAt) < now - SENT_RETENTION_MS) {
           corePorts().outboxStorage.delete(row.id);
           continue;
         }
-        const item = row.syncState === "sending" ? { ...row, syncState: "pending" as const } : row;
+        const item = revive(row, now);
         if (item !== row) corePorts().outboxStorage.put(item);
         byId.set(item.id, item);
       }
