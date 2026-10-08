@@ -1,4 +1,4 @@
-import { useRef, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Pressable, StyleSheet, type ViewStyle, type NativeSyntheticEvent } from "react-native";
 import {
   Camera,
@@ -87,6 +87,51 @@ const lineFeature = (line: [number, number][]): Feature => ({
   properties: {},
 });
 
+// The sources' layers never change, so they are built once. GeoJSONSource is
+// memoized, but its children are props too: layers written inline were new
+// elements, with new paint objects, on every render, which defeated the memo.
+const ROUTE_LAYERS = [
+  <Layer
+    key="route-line"
+    id="route-line"
+    type="line"
+    beforeId={MARKER_LAYER}
+    paint={{ "line-color": "#2563eb", "line-width": 4, "line-opacity": 0.85 }}
+  />,
+];
+
+const MARKER_LAYERS = [
+  <Layer
+    key={MARKER_LAYER}
+    id={MARKER_LAYER}
+    type="circle"
+    paint={{
+      "circle-color": ["get", "color"],
+      "circle-radius": 9,
+      "circle-stroke-color": "#ffffff",
+      "circle-stroke-width": 2,
+      "circle-opacity": ["case", ["==", ["get", "dimmed"], 1], 0.4, ["get", "opacity"]],
+    }}
+  />,
+  <Layer
+    key="marker-labels"
+    id="marker-labels"
+    type="symbol"
+    layout={{
+      "text-field": ["get", "label"],
+      "text-size": 11,
+      "text-allow-overlap": true,
+      "text-ignore-placement": true,
+    }}
+    paint={{ "text-color": "#ffffff" }}
+  />,
+];
+
+// Resolve a tapped marker id back to the caller's original type. Marker ids are
+// stringified into GeoJSON properties, so a numeric id comes back as a string —
+// coerce it so `f.id === id` comparisons on the caller side still match.
+const resolveId = (raw: string): RosmMarker["id"] => (/^-?\d+$/.test(raw) ? Number(raw) : raw);
+
 // Center on the fit-points centroid at a modest zoom when a bounding set is given,
 // else the explicit center. (A true fitBounds is a later refinement.)
 function resolveView(
@@ -120,43 +165,46 @@ export function RosmMap({
   const cameraRef = useRef<CameraRef>(null);
   const view = resolveView(center, zoom, fitPoints);
 
-  // Build the native GeoJSON sources once per data change, not once per render.
-  // The parent re-renders on every pan/zoom settle (region tracking); without
-  // these memos each settle hands GeoJSONSource a fresh object and forces a
-  // native source re-diff mid-gesture. `markers` is already memoized upstream,
-  // so this ref stays stable across unrelated re-renders.
-  const markerData = useMemo(() => markerFeatures(markers), [markers]);
-  const lineData = useMemo(() => (line && line.length > 1 ? lineFeature(line) : null), [line]);
+  // Serialized here, once per data change. GeoJSONSource stringifies an
+  // object on every render it gets, and this map renders on every GPS fix and
+  // pan settle; handed a string, it passes it through as it is.
+  const markerData = useMemo(() => JSON.stringify(markerFeatures(markers)), [markers]);
+  const lineData = useMemo(
+    () => (line && line.length > 1 ? JSON.stringify(lineFeature(line)) : null),
+    [line],
+  );
 
-  // Resolve a tapped marker id back to the caller's original type. Marker ids are
-  // stringified into GeoJSON properties, so a numeric id comes back as a string —
-  // coerce it so `f.id === id` comparisons on the caller side still match.
-  const resolveId = (raw: string): RosmMarker["id"] => (/^-?\d+$/.test(raw) ? Number(raw) : raw);
+  // Handlers read the latest callbacks through a ref, so each keeps one
+  // identity for the life of the map (the marker source's memo depends on it).
+  const callbacks = useRef({ onMarkerPress, onMapPress, onRegionChange });
+  useEffect(() => {
+    callbacks.current = { onMarkerPress, onMapPress, onRegionChange };
+  });
 
   // Marker taps are hit-tested natively by the source itself — the pressed
   // feature rides in on the event, so there's no JS-side queryRenderedFeatures
   // round-trip (that async bridge hop was the ~1s open lag). stopPropagation
   // keeps the same tap from also bubbling to the map's onPress.
-  const onMarkerHit = (e: NativeSyntheticEvent<MarkerPressEvent>) => {
+  const onMarkerHit = useCallback((e: NativeSyntheticEvent<MarkerPressEvent>) => {
     const mid = e.nativeEvent.features?.[0]?.properties?.mid;
     if (mid != null) {
-      onMarkerPress?.(resolveId(String(mid)));
+      callbacks.current.onMarkerPress?.(resolveId(String(mid)));
       e.stopPropagation?.();
     }
-  };
+  }, []);
 
   // Empty-map tap (no marker under the hitbox) → plain map press.
-  const onMapTap = (e: NativeSyntheticEvent<PressEvent>) => {
-    const [lon, lat] = e.nativeEvent.lngLat;
-    onMapPress?.(lat, lon);
-  };
+  const onMapTap = useCallback((e: NativeSyntheticEvent<PressEvent>) => {
+    const [tapLon, tapLat] = e.nativeEvent.lngLat;
+    callbacks.current.onMapPress?.(tapLat, tapLon);
+  }, []);
 
-  const onRegion = (e: NativeSyntheticEvent<RegionEvent>) => {
+  const onRegion = useCallback((e: NativeSyntheticEvent<RegionEvent>) => {
     const { center: c, zoom: z, bounds, userInteraction } = e.nativeEvent;
     // Ignore camera-driven settles so a recenter doesn't masquerade as a search.
     if (!userInteraction) return;
-    onRegionChange?.({ center: [c[1], c[0]], zoom: z, bounds });
-  };
+    callbacks.current.onRegionChange?.({ center: [c[1], c[0]], zoom: z, bounds });
+  }, []);
 
   return (
     <>
@@ -182,12 +230,7 @@ export function RosmMap({
 
         {lineData ? (
           <GeoJSONSource id="route" data={lineData}>
-            <Layer
-              id="route-line"
-              type="line"
-              beforeId={MARKER_LAYER}
-              paint={{ "line-color": "#2563eb", "line-width": 4, "line-opacity": 0.85 }}
-            />
+            {ROUTE_LAYERS}
           </GeoJSONSource>
         ) : null}
 
@@ -196,28 +239,7 @@ export function RosmMap({
           data={markerData}
           onPress={onMarkerPress ? onMarkerHit : undefined}
         >
-          <Layer
-            id={MARKER_LAYER}
-            type="circle"
-            paint={{
-              "circle-color": ["get", "color"],
-              "circle-radius": 9,
-              "circle-stroke-color": "#ffffff",
-              "circle-stroke-width": 2,
-              "circle-opacity": ["case", ["==", ["get", "dimmed"], 1], 0.4, ["get", "opacity"]],
-            }}
-          />
-          <Layer
-            id="marker-labels"
-            type="symbol"
-            layout={{
-              "text-field": ["get", "label"],
-              "text-size": 11,
-              "text-allow-overlap": true,
-              "text-ignore-placement": true,
-            }}
-            paint={{ "text-color": "#ffffff" }}
-          />
+          {MARKER_LAYERS}
         </GeoJSONSource>
 
         {/* Native location puck: MapLibre tracks GPS itself (off the JS thread) and
