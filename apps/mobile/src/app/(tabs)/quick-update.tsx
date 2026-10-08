@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, Text, useWindowDimensions, View } from "react-native";
+import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { SafeArea } from "../../components/ui/SafeArea";
 import type { Fountain, EditExtras } from "@rosm/core/schemas";
 import type { StopStatus } from "@rosm/core/stores/run";
@@ -40,9 +40,6 @@ function movedEnough(region: RosmRegion, last: Search): boolean {
 // via the outbox). Pan/zoom the map, then "Search this area" re-queries the visible
 // viewport — so zooming out searches a wider region. No routing.
 export default function QuickUpdate() {
-  // Sheet content width: full window minus the sheet's 16px horizontal padding
-  // on each side (a percentage width doesn't resolve inside the native host).
-  const { width: winW } = useWindowDimensions();
   // Snapshot the clock once for the dot recency coloring — it needn't tick live.
   const [now] = useState(() => Date.now());
   const [center, setCenter] = useState<Pt | null>(null);

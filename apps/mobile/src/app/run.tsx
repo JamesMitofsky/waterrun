@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, Text, useWindowDimensions, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { PointSheetHost } from "../components/ui/PointSheetHost";
 import { CheckCircleIcon } from "phosphor-react-native/src/icons/CheckCircle";
@@ -54,7 +54,6 @@ function maneuver(deg: number): string {
 export default function RunScreen() {
   const s = useRunSession();
   const router = useRouter();
-  const { width: winW } = useWindowDimensions();
 
   const [selectedId, setSelectedId] = useState<number | string | null>(null);
   const [addLocation, setAddLocation] = useState<{ lat: number; lon: number } | null>(null);

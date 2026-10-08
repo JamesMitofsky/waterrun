@@ -151,7 +151,15 @@ export function PointSheetHost({ isPresented, onDismiss, children }: Props) {
             {/* The ScrollView's own blank-tap dismissal needs a keyboard event
                 Android may never deliver here (see useKeyboardHeight), so a
                 plain press handler does it on both platforms. */}
-            <Pressable accessible={false} onPress={() => Keyboard.dismiss()}>
+            {/* Not a control: focusable={false} keeps Android from making it a
+                native clickable that TalkBack reads, with every text inside, as
+                one button; android_disableSound skips the click sound. */}
+            <Pressable
+              accessible={false}
+              focusable={false}
+              android_disableSound
+              onPress={() => Keyboard.dismiss()}
+            >
               <FieldFocusContext value={fieldFocus}>{children}</FieldFocusContext>
             </Pressable>
           </ScrollView>
