@@ -7,7 +7,7 @@ import { fmtDist } from "@rosm/core/geo";
 import type { Fountain } from "@rosm/core/schemas";
 import { Button } from "../../components/ui/Button";
 import { RosmMap, type RosmMarker } from "../../map/RosmMap";
-import { getLastKnownPosition } from "../../ports/geolocation";
+import { recentFix } from "../../ports/locateFast";
 import { RouteBuilderPanel } from "../../components/planner/RouteBuilderPanel";
 import { PhaseNav } from "../../components/planner/PhaseNav";
 import { usePlannerMarkers } from "../../components/planner/usePlannerMarkers";
@@ -78,7 +78,9 @@ function PlanContent() {
     [stops, pinnedIds, excludedIds],
   );
 
-  // Auto-locate on mount: skip config phase and begin querying a 4 mile radius immediately.
+  // Auto-locate on mount: skip config phase and begin querying a 4 mile radius
+  // immediately. The phone's recent fix (when it has one fresh and close
+  // enough) places the start at once; the GPS fix then refines it.
   useEffect(() => {
     const s = usePlanner.getState();
     s.setRadiusMi(4);
@@ -88,9 +90,9 @@ function PlanContent() {
 
     (async () => {
       if (!usePlanner.getState().center) {
-        const quick = await getLastKnownPosition();
+        const quick = await recentFix();
         if (quick && !usePlanner.getState().center) {
-          usePlanner.getState().recenter({ lat: quick.lat, lon: quick.lon });
+          usePlanner.getState().recenter(quick);
         }
         usePlanner.getState().geolocate();
       }
