@@ -87,7 +87,7 @@ your OSM OAuth client (see `apps/site/.env.example`).
 ## Contributing
 
 Pull requests welcome — the project lives at
-[github.com/JamesMitofsky/rosm](https://github.com/JamesMitofsky/rosm).
+[github.com/JamesMitofsky/waterrun](https://github.com/JamesMitofsky/waterrun).
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, code style, and PR conventions.
 
 ## Deploy
