@@ -10,7 +10,13 @@ import {
 /**
  * The box every MapLibre map on the site renders inside: a server-rendered
  * loading frame that holds a picture of the map's opening view until the real
- * map reports its first paint, then dissolves off it.
+ * map reports it has drawn that view, then dissolves off it.
+ *
+ * How the wait looks is the frame's `loading` (see `frames.ts`): frosted glass
+ * and a spinner over a picture that is only the ground, or — for a frame whose
+ * placeholder is the map itself, already in motion — the picture as it is,
+ * with nothing to say that anything is loading, because to the visitor
+ * nothing is.
  *
  * The frame owns the sizing, not the island, so the loading state and the map
  * occupy exactly the same rectangle and nothing reflows when one replaces the
@@ -95,9 +101,15 @@ const sizeCss = perVariant(
     `${selector} .map-frame__shot,${selector} .map-frame__content` +
     `{width:${v.frame.width}px;height:${v.frame.height}px}`,
 );
-const spinnerCss = perVariant((v) =>
-  v.subject ? `${selector} .map-frame__spinner{translate:${v.subject.x}px ${v.subject.y}px}` : null,
-);
+const { loading } = MAP_FRAMES[frame];
+const frosted = loading.kind === "frosted" ? loading : null;
+const spinnerCss = frosted
+  ? perVariant((v) =>
+      v.subject
+        ? `${selector} .map-frame__spinner{translate:${v.subject.x}px ${v.subject.y}px}`
+        : null,
+    )
+  : "";
 const frameCss = aspectCss + sizeCss + spinnerCss;
 ---
 
@@ -115,7 +127,7 @@ const frameCss = aspectCss + sizeCss + spinnerCss;
 }
 <div
   class:list={["map-frame", className]}
-  style={`--basemap-background: ${BASEMAP_BACKGROUND}; --map-frame-radius: ${radius}; --map-frame-blur: ${MAP_FRAMES[frame].blur}px; --map-reveal-ms: ${MAP_REVEAL_MS}ms`}
+  style={`--basemap-background: ${BASEMAP_BACKGROUND}; --map-frame-radius: ${radius};${frosted ? ` --map-frame-blur: ${frosted.blur}px;` : ""} --map-reveal-ms: ${MAP_REVEAL_MS}ms`}
   data-map-frame={frame}
 >
   {
@@ -154,33 +166,36 @@ const frameCss = aspectCss + sizeCss + spinnerCss;
     <div class="map-frame__content"><slot name="placeholder" /></div>
 
     {
-      /* Frosts the frame, its route and its pins, and nothing below. This is the
-        blur — it is applied *over* the map, not baked into it, so what is
-        underneath stays a normal picture and a normal set of shapes, and the
-        frost is a single layer whose opacity is the only thing that animates.
+      frosted && (
+        <Fragment>
+          {/* Frosts the frame, its route and its pins, and nothing below. This is
+            the blur — it is applied *over* the map, not baked into it, so what
+            is underneath stays a normal picture and a normal set of shapes, and
+            the frost is a single layer whose opacity is the only thing that
+            animates.
 
-        A blur radius that winds down over the reveal is the one thing a
-        compositor cannot cache: every frame would re-run a full-frame gaussian
-        on the same GPU rasterising the first batch of vector tiles. Opacity it
-        can animate without repainting anything, and fading a frosted pane out
-        looks the same as thinning it. */
-    }
-    <div class="map-frame__glass" aria-hidden="true"></div>
+            A blur radius that winds down over the reveal is the one thing a
+            compositor cannot cache: every frame would re-run a full-frame
+            gaussian on the same GPU rasterising the first batch of vector
+            tiles. Opacity it can animate without repainting anything, and
+            fading a frosted pane out looks the same as thinning it. */}
+          <div class="map-frame__glass" aria-hidden="true" />
 
-    {
-      /* The one moving thing on the frame, so the state reads as loading rather
-        than as a map that ignores taps. Same arc-on-a-ring the site used before
-        this frame existed, in the brand blue rather than white — it now sits on
-        frosted paper instead of a solid blue panel. */
+          {/* The one moving thing on the frame, so the state reads as loading
+            rather than as a map that ignores taps. Same arc-on-a-ring the site
+            used before this frame existed, in the brand blue rather than white —
+            it now sits on frosted paper instead of a solid blue panel. */}
+          <svg class="map-frame__spinner" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" opacity="0.25" />
+            <path
+              fill="currentColor"
+              opacity="0.75"
+              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+            />
+          </svg>
+        </Fragment>
+      )
     }
-    <svg class="map-frame__spinner" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" opacity="0.25"></circle>
-      <path
-        fill="currentColor"
-        opacity="0.75"
-        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-      ></path>
-    </svg>
   </div>
 
   {
@@ -359,8 +374,8 @@ const frameCss = aspectCss + sizeCss + spinnerCss;
    */
   const UNMOUNT_FALLBACK_MS = MAP_REVEAL_MS + 400;
   /**
-   * Last resort. `MapView` reports ready on load, on idle, on error and on its
-   * own 20s load timeout, so the only way the overlay is still up past this is
+   * Last resort. `MapView` reports ready once its opening view is drawn, on
+   * error, and on its own load timeouts, so the only way the overlay is still up past this is
    * that the island's JS never ran at all. A stale picture of a map beats a
    * loading state that never ends.
    */

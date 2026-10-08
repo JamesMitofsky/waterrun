@@ -50,6 +50,7 @@ import {
   PLACEHOLDER_QUALITY,
   placeholderSize,
   type MapFrameId,
+  type MapFrameSpec,
   type MapFrameVariant,
 } from "../src/lib/basemap/frames";
 import rawMapStyle from "../src/lib/basemap/map-style.json" with { type: "json" };
@@ -160,12 +161,13 @@ function pageHtml(variant: MapFrameVariant, style: StyleSpecification) {
 async function renderVariant(
   browser: Browser,
   style: StyleSpecification,
+  spec: MapFrameSpec,
   variant: MapFrameVariant,
 ) {
   const { width, height } = variant.frame;
-  const out = placeholderSize(variant);
-  // One CSS pixel per device pixel: the picture is downscaled to a thumbnail
-  // right after, so rendering denser would only be thrown away.
+  const out = placeholderSize(spec, variant);
+  // One CSS pixel per device pixel: the picture is downscaled right after, so
+  // rendering denser would only be thrown away.
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
   try {
     await page.route(`${PAGE_ORIGIN}/**`, (route) =>
@@ -211,7 +213,7 @@ async function main() {
       (typeof MAP_FRAMES)[MapFrameId],
     ][]) {
       for (const variant of spec.variants) {
-        const { dataUri, bytes, out } = await renderVariant(browser, style, variant);
+        const { dataUri, bytes, out } = await renderVariant(browser, style, spec, variant);
         rendered.push({ id, media: variant.media, dataUri });
         console.log(
           `${id.padEnd(20)} ${(variant.media ?? "default").padEnd(20)} ` +
@@ -244,8 +246,9 @@ import type { MapFrameId } from "./frames";
  * data URI it arrives inside the HTML that references it, so there is no
  * request, no connection, and nothing to lose the race to.
  *
- * They are thumbnails, magnified into the frame, which is why that is
- * affordable — see PLACEHOLDER_WIDTH in ./frames.
+ * Most are thumbnails, magnified into the frame, which is why that is
+ * affordable; a frame that shows its picture unfrosted draws a sharper one —
+ * see placeholderSize in ./frames.
  */
 export const MAP_PLACEHOLDERS: Record<MapFrameId, { media: string | null; src: string }[]> = {
 ${[...byId]

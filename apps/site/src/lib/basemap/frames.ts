@@ -74,15 +74,26 @@ export type MapFrameSpec = {
   /** Human note about which component and which page this frame belongs to. */
   description: string;
   /**
-   * Radius, in CSS pixels, of the frosted glass `MapFrame.astro` lays over the
-   * picture while the map loads. Raise it for more frost, lower it to show more
-   * of the map; the picture underneath is unchanged either way.
+   * What `MapFrame.astro` shows while the map loads.
    *
-   * Per frame rather than one value for the site: a frame whose route is drawn
-   * into the loading state (the hero) wants that route readable through the
-   * glass, while a frame of bare basemap has nothing to lose to heavier frost.
+   * - `frosted`: the picture under frosted glass, with a spinner. For a frame
+   *   whose picture is only the ground the map opens on — its points arrive
+   *   with the map — so the wait has to read as loading. `blur` is the glass's
+   *   radius in CSS pixels: raise it for more frost, lower it to show more of
+   *   the map; the picture underneath is unchanged either way.
+   * - `seamless`: the picture as it is, no glass and no spinner. For a frame
+   *   whose placeholder is the map itself — its content drawn exactly and
+   *   already moving (the hero's replay, `DemoRoutePlaceholder.astro`) — so
+   *   there is no wait to signal: the live map takes over mid-motion, and the
+   *   dissolve is between two pictures of the same thing.
    */
-  blur: number;
+  loading: { kind: "frosted"; blur: number } | { kind: "seamless" };
+  /**
+   * The picture's width as a fraction of the frame's CSS width, for a frame
+   * whose picture is seen unfrosted. Absent, the picture is a
+   * {@link PLACEHOLDER_WIDTH} thumbnail.
+   */
+  placeholderScale?: number;
   variants: MapFrameVariant[];
 };
 
@@ -107,9 +118,9 @@ export const TILE_SIZE = 512;
  *
  * Long enough to read as the frame clearing rather than as a cut, and no
  * longer: the map is already drawn and interactive by then, so every extra
- * millisecond is a finished map behind frosted glass. Defined here, beside
+ * millisecond is a finished map behind a picture of it. Defined here, beside
  * the rest of the frame contract, because a map that starts something the
- * moment it is revealed (`DemoRunMap`'s replay) has to wait this out first.
+ * moment it is revealed has to wait this out first.
  */
 export const MAP_REVEAL_MS = 280;
 
@@ -147,7 +158,12 @@ const demoCenter = (zoom: number, subject: { x: number; y: number }) =>
 export const MAP_FRAMES: Record<MapFrameId, MapFrameSpec> = {
   "demo-run": {
     description: "DemoRunMap in the landing hero (index.astro)",
-    blur: 4,
+    // The replay plays in the frame from the first paint, so the frame is the
+    // map, not a stand-in for it — and the picture under it is seen as it is,
+    // so it is drawn at half the frame's size: soft only against the live map
+    // it dissolves into, not on its own.
+    loading: { kind: "seamless" },
+    placeholderScale: 0.5,
     variants: [
       {
         media: "(max-width: 767px)",
@@ -167,7 +183,7 @@ export const MAP_FRAMES: Record<MapFrameId, MapFrameSpec> = {
   },
   "live-fountains-dc": {
     description: "LiveFountainMap filling the viewport on /public-drinking-fountains",
-    blur: 8,
+    loading: { kind: "frosted", blur: 8 },
     variants: [
       {
         // `LiveFountainMap`'s own breakpoint — note it is *not* the same one the
@@ -188,9 +204,10 @@ export const MAP_FRAMES: Record<MapFrameId, MapFrameSpec> = {
 };
 
 /**
- * Width, in pixels, of the pre-rendered frame — a thumbnail, not a picture.
+ * Width, in pixels, of the pre-rendered frame — a thumbnail, not a picture —
+ * for a frame that does not set its own `placeholderScale`.
  *
- * This is the frame's real blur control. The image is drawn at its frame's CSS
+ * For a frosted frame this is the real blur control. The image is drawn at its frame's CSS
  * size, so the ratio between the two *is* the softening: at 96px, where this
  * started, a phone frame magnified every source pixel several times and a
  * desktop one over ten, which dissolved the road network entirely and left
@@ -206,17 +223,29 @@ export const MAP_FRAMES: Record<MapFrameId, MapFrameSpec> = {
  * each these ship as base64 data URIs inside the HTML, so the loading frame
  * costs no request at all — and a request is exactly what it could not afford,
  * since it would queue against the ~1MB engine chunk it exists to cover for.
+ *
+ * A seamless frame shows its picture unfrosted, where a thumbnail magnified
+ * eight times reads as a blurred photograph rather than as the map; it states
+ * a `placeholderScale` instead and pays for it in bytes.
  */
 export const PLACEHOLDER_WIDTH = 240;
 
-/** Quality the thumbnail is encoded at. Generous — a 240px image is cheap. */
+/** Quality the picture is encoded at. Generous — a 240px image is cheap. */
 export const PLACEHOLDER_QUALITY = 75;
 
-/** The thumbnail's pixel size for a variant: {@link PLACEHOLDER_WIDTH} at the frame's aspect. */
-export function placeholderSize(variant: MapFrameVariant) {
+/**
+ * The picture's pixel size for a variant of a frame: the frame's
+ * `placeholderScale` of its CSS width, or {@link PLACEHOLDER_WIDTH}, at the
+ * frame's aspect.
+ */
+export function placeholderSize(spec: MapFrameSpec, variant: MapFrameVariant) {
+  const width =
+    spec.placeholderScale === undefined
+      ? PLACEHOLDER_WIDTH
+      : Math.round(variant.frame.width * spec.placeholderScale);
   return {
-    width: PLACEHOLDER_WIDTH,
-    height: Math.round((PLACEHOLDER_WIDTH * variant.frame.height) / variant.frame.width),
+    width,
+    height: Math.round((width * variant.frame.height) / variant.frame.width),
   };
 }
 

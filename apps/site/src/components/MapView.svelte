@@ -2,6 +2,14 @@
   import type { Snippet } from "svelte";
   import type * as maplibregl from "maplibre-gl";
   import { ROUTE_LINE, START_FLAG } from "@/lib/basemap/routeLine";
+  import {
+    BECKON_REACH_PX,
+    DEFAULT_MARKER_RADIUS,
+    MARKER_STROKE_PX,
+    PULSE_GROWTH,
+    PULSE_OPACITY,
+    RUNNER_DOT,
+  } from "@/lib/basemap/markerStyle";
 
   export type MapMarker = {
     id: number | string;
@@ -37,33 +45,22 @@
   const MARKERS_LAYER = "markers-circle";
   const RUNNER_SOURCE = "runner";
   const RUNNER_LAYER = "runner-circle";
-  // The runner dot: the line's own blue, ringed in white like the stops but
-  // smaller than one, so it reads as moving along the route rather than as
-  // another stop on it. 14px across, as the loading frame draws it.
+  const LINE_SOURCE = "route-line";
+  const LINE_LAYER = "route-line-drawn";
+  /** Each source this component adds, and the layer that draws it. */
+  const OWN_LAYER_OF: Record<string, string> = {
+    [LINE_SOURCE]: LINE_LAYER,
+    [MARKERS_SOURCE]: MARKERS_LAYER,
+    [RUNNER_SOURCE]: RUNNER_LAYER,
+  };
+  // The runner dot (`RUNNER_DOT`), in the line's own blue.
   const RUNNER_PAINT: maplibregl.CircleLayerSpecification["paint"] = {
-    "circle-radius": 7,
+    "circle-radius": RUNNER_DOT.radius,
     "circle-color": ROUTE_LINE.color,
-    "circle-stroke-width": 2.5,
+    "circle-stroke-width": RUNNER_DOT.stroke,
     "circle-stroke-color": "#fff",
   };
   const PULSE_LAYER = "markers-pulse";
-  /** A dot's radius when the caller gives no `markerRadius`. */
-  const DEFAULT_MARKER_RADIUS = 9;
-  /** The white ring around every stop's dot, at full size. */
-  const MARKER_STROKE_PX = 2;
-  /** How far a ping's ring grows past the dot's radius, as a multiple of it. */
-  const PULSE_GROWTH = 1.4;
-  /**
-   * How far past the dot's white ring a beckon's wave travels before it has
-   * faded out.
-   *
-   * Set by the neighbours rather than by taste. The wave is DOM laid over the
-   * canvas, so it washes over anything it reaches — dot, white ring and label
-   * alike — and on the landing hero's narrow layout the stop before the one
-   * beckoning is under 40px away, centre to centre. 15px ends the wave just
-   * clear of that stop's white ring.
-   */
-  const BECKON_REACH_PX = 15;
   /**
    * How long a newly appeared dot takes to grow to full size. Exported for a
    * caller timing something to start once the dots have settled.
@@ -128,19 +125,8 @@
     return {
       "circle-radius": ["+", baseRadius, ["*", baseRadius * PULSE_GROWTH, p]],
       "circle-color": ["get", "color"],
-      "circle-opacity": ["case", [">", p, 0], ["*", 0.5, ["-", 1, p]], 0],
+      "circle-opacity": ["case", [">", p, 0], ["*", PULSE_OPACITY, ["-", 1, p]], 0],
     };
-  }
-
-  /**
-   * How far through a `pulses` ping, 0–1, its ring is first seen. The ring
-   * starts at the dot's own radius and the dot is drawn over it
-   * (`pulsePaint`), so the start of every ping is hidden until the ring has
-   * grown past the dot's white ring. For a caller lining something up with
-   * the moment a ping is seen to start.
-   */
-  export function pulseVisibleAt(markerRadius = DEFAULT_MARKER_RADIUS): number {
-    return MARKER_STROKE_PX / (markerRadius * PULSE_GROWTH);
   }
 
   const ATTRIBUTION =
@@ -230,7 +216,9 @@
 
 <script lang="ts">
   import { untrack } from "svelte";
+  import type { Attachment } from "svelte/attachments";
   import "maplibre-gl/dist/maplibre-gl.css";
+  import Beckon from "@/components/Beckon.svelte";
   import rawMapStyle from "@/lib/basemap/map-style.json";
   import {
     MapLibre,
@@ -312,6 +300,17 @@
     // loop where a ping marks one moment. Drawn in CSS over the map rather
     // than on the canvas, so the loop costs no repaint.
     beckon?: string | null;
+    // When the beckon's loop began, as a `performance.now()` time, for a
+    // beckon that has to join a loop already running elsewhere — the hero's,
+    // started by its loading frame before this map existed — rather than
+    // start its own when it mounts (see `Beckon`).
+    beckonSince?: number;
+    // Whether the markers pop in when the map first draws them: dots growing
+    // from nothing, labels and the start flag scaling in. For a map that
+    // dissolves out of a loading frame already showing them at full size, off
+    // — a pop there is a flicker at the hand-off. Later changes still pop: a
+    // new marker set, a label's `popKey`.
+    popInOnLoad?: boolean;
     onViewChange?: (
       view: {
         lat: number;
@@ -367,6 +366,8 @@
     runner,
     pulses,
     beckon = null,
+    beckonSince,
+    popInOnLoad = true,
     onViewChange,
     recenterKey,
     fitPoints,
@@ -554,20 +555,6 @@
   const beckonMarker = $derived(
     beckon == null ? undefined : markers.find((m) => String(m.id) === beckon),
   );
-  // The beckon's geometry, as radii from the marker's centre: where the dot
-  // ends (white ring included) and where the wave ends. The wave is drawn at
-  // its full size and scaled down to start at the dot's edge
-  // (`--beckon-from`), so it grows by transform alone.
-  const beckonStyle = $derived.by(() => {
-    const dotR = markerRadius + MARKER_STROKE_PX;
-    const waveR = dotR + BECKON_REACH_PX;
-    return [
-      `--beckon-color: ${ROUTE_LINE.color}`,
-      `--beckon-dot-r: ${dotR}px`,
-      `--beckon-wave-r: ${waveR}px`,
-      `--beckon-from: ${dotR / waveR}`,
-    ].join("; ");
-  });
   const runnerData = $derived<GeoJSON.Feature | null>(
     runner
       ? {
@@ -718,14 +705,21 @@
   // One-shot: whichever of the paths below gets there first, the frame is told
   // exactly once.
   //
-  // What counts as "painted" decides how long the visitor looks at a picture of
-  // a map instead of the map, so three things race for it:
+  // What counts as "drawn" decides how long the visitor looks at a picture of
+  // a map instead of the map — and a picture that *is* this map (the hero's,
+  // route and all) dissolves into whatever has been drawn by then. So drawn
+  // means the opening view with this component's own route and markers on it:
   //
-  // - `load`, once the style is parsed and the first frame is drawn. The normal
-  //   winner and the earliest honest moment — hence the `isStyleLoaded()`
-  //   guard, since `load` can fire with the style still resolving.
-  // - `idle`, once every tile in view has loaded *and* rendered. Much later,
-  //   and only the winner when `load` fired before the style settled.
+  // - the first frame, from `load` on, by which every source this component
+  //   adds has drawn (`ownSourcesDrawn`). `load` itself waits for the style
+  //   and every basemap tile in view, but the route, markers and runner are
+  //   added by child components and parsed in a worker, and can land frames
+  //   later: revealed on `load` alone, they blink in after the picture of
+  //   them has already gone.
+  // - `idle`, once everything in view has loaded and rendered, for a map that
+  //   went quiet before any frame passed that test.
+  // - `DRAWN_GRACE_MS` after `load`, whatever has drawn: a source that never
+  //   reports must not hold a working map behind its picture.
   // - failure, either an error or the load timeout below. A stale picture is
   //   still better than a loading state that never ends, and the error card
   //   this component renders is *underneath* the overlay.
@@ -740,6 +734,73 @@
       onReady?.();
     });
   }
+
+  // The sources this component has added and expects drawn: the markers
+  // always, the line and the runner when there are any.
+  function ownSources(): string[] {
+    const ids = [MARKERS_SOURCE];
+    if (lineData) ids.push(LINE_SOURCE);
+    if (runnerData) ids.push(RUNNER_SOURCE);
+    return ids;
+  }
+
+  // Which of this component's sources have drawn at least once. Latched off
+  // MapLibre's `sourcedata`: a source counts once a tile of it has loaded —
+  // drawn from the next frame on, and kept on screen through any later reload
+  // — or once it reports itself loaded with its layer in place, which is the
+  // only report a source with nothing in view ever makes. Latched rather than
+  // asked with `isSourceLoaded` at the moment of revealing, because the
+  // runner's source is re-set on every frame of the hero's replay and is
+  // almost never idle at any given moment.
+  // Not a `SvelteSet`: it is read only from MapLibre's event handlers, never
+  // by anything reactive, so there is nothing for it to notify.
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity
+  const drawnSources = new Set<string>();
+  const ownSourcesDrawn = () => ownSources().every((id) => drawnSources.has(id));
+
+  /** After a frame is drawn: tell the frame if that frame had everything on it. */
+  function signalIfDrawn() {
+    if (isLoaded && ownSourcesDrawn()) signalReady();
+  }
+
+  /** On `idle`: everything in view is loaded and drawn, so only our layers need to exist. */
+  function signalIfIdle() {
+    if (isLoaded && ownSources().every((id) => map?.getLayer(OWN_LAYER_OF[id]))) signalReady();
+  }
+
+  $effect(() => {
+    const m = map;
+    if (!m) return;
+    const onSourceData = (e: maplibregl.MapSourceDataEvent) => {
+      const layer = OWN_LAYER_OF[e.sourceId];
+      if (!layer || drawnSources.has(e.sourceId)) return;
+      if (e.tile || (e.isSourceLoaded && m.getLayer(layer))) drawnSources.add(e.sourceId);
+    };
+    // `render` fires once a frame has been drawn, so a source latched before
+    // it was on it.
+    const onRender = () => {
+      signalIfDrawn();
+      if (signalledReady) m.off("render", onRender);
+    };
+    m.on("sourcedata", onSourceData);
+    m.on("render", onRender);
+    return () => {
+      m.off("sourcedata", onSourceData);
+      m.off("render", onRender);
+    };
+  });
+
+  /** How long after `load` the frame is told regardless of what has drawn. */
+  const DRAWN_GRACE_MS = 3000;
+  $effect(() => {
+    if (!isLoaded) return;
+    const timer = setTimeout(() => {
+      if (signalledReady) return;
+      console.warn("MapView: sources not drawn", DRAWN_GRACE_MS, "ms after load; revealing anyway");
+      signalReady();
+    }, DRAWN_GRACE_MS);
+    return () => clearTimeout(timer);
+  });
 
   // Keep the canvas the same size as the box it sits in.
   //
@@ -823,13 +884,17 @@
 
   // Pop new dots in: grow circle-radius 0 → target whenever the marker set
   // changes. Radius is a shader uniform, so this stays smooth for many points.
+  // The set drawn on load pops only under `popInOnLoad`.
+  let drewFirstSet = false;
   $effect(() => {
     markerIdSig; // track
     if (!isLoaded) {
       popScale = 0;
       return;
     }
-    if (motionMs(MARKER_POP_MS) === 0) {
+    const firstSet = !drewFirstSet;
+    drewFirstSet = true;
+    if ((firstSet && !popInOnLoad) || motionMs(MARKER_POP_MS) === 0) {
       popScale = 1;
       return;
     }
@@ -1072,8 +1137,27 @@
         }
       }
     }
-    if (map?.isStyleLoaded()) signalReady();
+    signalIfDrawn();
   }
+
+  // The label pop (`marker-pop-label`, globals.css) is a CSS animation that
+  // runs when its class lands, so the class is put on each label — and the
+  // start flag — as the element is created rather than written in the markup.
+  // A label's first appearance pops only under `popInOnLoad`; every later one
+  // does, and a `popKey` change is exactly that, since the key block rebuilds
+  // the element. Keyed by `data-pop-id` read off the element, so the
+  // attachment is one stable function that never re-runs on a marker update.
+  // Not a `SvelteSet`, on purpose: read inside the attachment, a reactive set
+  // would re-run every label's `popIn` whenever one label was added to it —
+  // and popping all of them again is exactly what this exists to prevent.
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity
+  const shownLabels = new Set<string>();
+  const popIn: Attachment<HTMLElement> = (el) => {
+    const id = el.dataset.popId ?? "";
+    const firstShown = !shownLabels.has(id);
+    shownLabels.add(id);
+    if (!firstShown || untrack(() => popInOnLoad)) el.classList.add("marker-pop-label");
+  };
 
   function handleClick(ev: maplibregl.MapMouseEvent) {
     if (!map || !interactive) return;
@@ -1166,7 +1250,7 @@
     keyboard={interactive}
     onload={handleLoad}
     onzoom={trackZoomLimits}
-    onidle={signalReady}
+    onidle={signalIfIdle}
     onerror={handleError}
     onclick={handleClick}
     onmoveend={(ev) => emitView(!!(ev as { originalEvent?: unknown }).originalEvent)}
@@ -1232,7 +1316,7 @@
     {/if}
 
     {#if lineData}
-      <GeoJSONSource data={lineData} lineMetrics={lineProgress !== undefined}>
+      <GeoJSONSource id={LINE_SOURCE} data={lineData} lineMetrics={lineProgress !== undefined}>
         {#if lineUpcoming}
           <!-- Listed first, so it is added first and the drawn line paints
                over it wherever the two overlap. Faint, not dashed: a loading
@@ -1241,7 +1325,7 @@
                shift at the hand-off. -->
           <LineLayer layout={LINE_LAYOUT} paint={UPCOMING_PAINT} />
         {/if}
-        <LineLayer layout={LINE_LAYOUT} paint={linePaint} />
+        <LineLayer id={LINE_LAYER} layout={LINE_LAYOUT} paint={linePaint} />
       </GeoJSONSource>
     {/if}
 
@@ -1277,11 +1361,12 @@
     {#each labeled as m (m.id)}
       <Marker lnglat={[m.lon, m.lat]} style={{ pointerEvents: "none" }}>
         {#snippet content()}
-          <!-- Keyed so a caller can replay the pop by changing `popKey`; the
-               keyframe runs on mount. -->
+          <!-- Keyed so a caller can replay the pop by changing `popKey`: the
+               element is rebuilt, and `popIn` pops it. -->
           {#key m.popKey}
             <span
-              class="marker-pop-label"
+              data-pop-id="marker:{m.id}"
+              {@attach popIn}
               style="color:#fff; font-size:11px; font-weight:700; line-height:1; opacity:{m.dimmed
                 ? 0.45
                 : 1}; text-shadow:0 1px 1px rgba(0,0,0,.35);"
@@ -1295,12 +1380,15 @@
 
     {#if beckonMarker}
       <!-- Mounted after the labels, so drawn over them: the wave is masked
-           clear of the dot and its label (see `.beckon-wave`). -->
+           clear of the dot and its label (see `Beckon`). -->
       <Marker lnglat={[beckonMarker.lon, beckonMarker.lat]} style={{ pointerEvents: "none" }}>
         {#snippet content()}
-          <span class="beckon" style={beckonStyle} aria-hidden="true">
-            <span class="beckon-wave"></span>
-          </span>
+          <Beckon
+            color={ROUTE_LINE.color}
+            dotR={markerRadius + MARKER_STROKE_PX}
+            reachPx={BECKON_REACH_PX}
+            since={beckonSince}
+          />
         {/snippet}
       </Marker>
     {/if}
@@ -1311,7 +1399,9 @@
       <Marker lnglat={[start[1], start[0]]} style={{ pointerEvents: "none" }}>
         {#snippet content()}
           <span
-            class="marker-pop-label start-flag"
+            class="start-flag"
+            data-pop-id="start"
+            {@attach popIn}
             style="--flag-color: {START_FLAG.color}; --flag-dx: {START_FLAG.px *
               (0.5 - START_FLAG.pole.x)}px; --flag-dy: {START_FLAG.px *
               (0.5 - START_FLAG.pole.y)}px;"
@@ -1463,118 +1553,5 @@
     display: grid;
     place-items: center;
     color: #333;
-  }
-
-  /* The beckon (`beckon`): soft waves in the route's blue let out from under
-     the dot on a double beat — dun dun, rest, dun dun — every 2.08s. The two
-     waves of a beat start 200ms apart; each takes 1.8s to travel out and
-     fade, and the next beat lands 80ms after the second has gone.
-
-     - One colour. The route's blue is what marks this stop as the run's next;
-       a second one adds noise, not meaning.
-     - A fill, not a stroke. The wave grows by `transform: scale()`, which
-       scales a border or shadow along with the box — a stroked ring swells
-       into a thick, blurred band on the way out. A fill has no thickness to
-       swell. It is densest at its leading edge, so it reads as a wave moving
-       outward rather than a disc inflating.
-     - Masked clear of the dot. The wave is laid over the canvas and would
-       tint the dot and its label. The mask is on the unscaled `.beckon-wave`
-       box, so the hole stays at the dot's edge while the fill grows through
-       it: each wave is born hidden under the dot and emerges from it.
-     - Short (`BECKON_REACH_PX`), so it ends before the nearest neighbour.
-
-     The wave grows about 2.4x, far enough that interpolating `scale()`
-     directly would front-load the growth by its own accord. So the scale is
-     stepped geometrically, `from^(1 - p)`, off a progress `--beckon-p` that
-     the animation drives: geometry in the `transform`, timing in the curve
-     on `--beckon-p`, and with the growth even to the eye the curve alone
-     decides how the wave moves. It is an attack, on purpose: each wave leaps
-     clear of the dot in its first few hundred ms, then drifts out as it
-     fades. A curve starting at rest would leave the first wave barely past
-     the dot when the second is born 200ms later, and the pair would read as
-     one thick wave instead of two beats. The fade holds each wave full
-     through its leap, so both are seen leaving before they thin out. */
-  @property --beckon-p {
-    syntax: "<number>";
-    inherits: false;
-    initial-value: 0;
-  }
-  .beckon {
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    pointer-events: none;
-  }
-  .beckon-wave {
-    position: absolute;
-    inset: calc(-1 * var(--beckon-wave-r));
-    mask-image: radial-gradient(
-      circle closest-side,
-      transparent calc(var(--beckon-dot-r) - 0.5px),
-      #000 calc(var(--beckon-dot-r) + 0.5px)
-    );
-  }
-  /* The two waves of a beat: `::before` on the beat, `::after` 200ms behind
-     it. A delay offsets only the start, so across iterations of the same
-     length the pair keeps its spacing for as long as the loop runs. Until
-     its delay is up the second wave sits at its base opacity, 0. */
-  .beckon-wave::before,
-  .beckon-wave::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: 50%;
-    background: radial-gradient(
-      circle closest-side,
-      color-mix(in srgb, var(--beckon-color) 6%, transparent) 50%,
-      color-mix(in srgb, var(--beckon-color) 28%, transparent) 92%,
-      color-mix(in srgb, var(--beckon-color) 40%, transparent) calc(100% - 1px),
-      transparent
-    );
-    transform: scale(pow(var(--beckon-from), 1 - var(--beckon-p)));
-    opacity: 0;
-    animation:
-      beckon-wave-grow 2080ms infinite,
-      beckon-wave-fade 2080ms infinite;
-  }
-  .beckon-wave::after {
-    animation-delay: 200ms;
-  }
-  /* Both run 2.08s — the 200ms between the waves, a wave's 1.8s trip, and an
-     80ms rest — with the trip in the first 86.54%, held gone for the rest;
-     the fade holds full for the first 400ms (19.23%). Two animations,
-     not one, so growth and fade each keep a curve of their own. */
-  @keyframes beckon-wave-grow {
-    0% {
-      --beckon-p: 0;
-      animation-timing-function: cubic-bezier(0.15, 0.6, 0.3, 1);
-    }
-    86.54%,
-    100% {
-      --beckon-p: 1;
-    }
-  }
-  @keyframes beckon-wave-fade {
-    0%,
-    19.23% {
-      opacity: 1;
-      animation-timing-function: linear;
-    }
-    86.54%,
-    100% {
-      opacity: 0;
-    }
-  }
-  /* Still, one wave is held at its full reach, faint, so the stop stands out
-     from the others without moving. The second stays at its base opacity. */
-  @media (prefers-reduced-motion: reduce) {
-    .beckon-wave::before,
-    .beckon-wave::after {
-      animation: none;
-      --beckon-p: 1;
-    }
-    .beckon-wave::before {
-      opacity: 0.6;
-    }
   }
 </style>

@@ -1,33 +1,64 @@
 ---
-import { MAP_FRAMES, offsetFromCenter } from "@/lib/basemap/frames";
-import { DC_FOUNTAINS, DC_ROUTE, demoStopColor } from "@/lib/demoRoute";
-import { DEMO_RUN_END, demoRouteRunBy, demoRunnerAt, demoStatusesAt } from "@/lib/demoRun";
+import Beckon from "@/components/Beckon.svelte";
+import { MAP_FRAMES } from "@/lib/basemap/frames";
+import {
+  BECKON_REACH_PX,
+  DEFAULT_MARKER_RADIUS,
+  MARKER_STROKE_PX,
+  PULSE_GROWTH,
+  PULSE_OPACITY,
+  RUNNER_DOT,
+} from "@/lib/basemap/markerStyle";
 import { ROUTE_LINE, START_FLAG } from "@/lib/basemap/routeLine";
+import {
+  DC_FOUNTAINS,
+  DC_ROUTE,
+  DEMO_NEXT_STOP,
+  SEED_STATUSES,
+  demoStopColor,
+} from "@/lib/demoRoute";
+import {
+  DEMO_ARRIVAL_MS,
+  DEMO_RUN_END,
+  DEMO_RUN_TIMING,
+  DEMO_SEEDED_IN_ORDER,
+  demoStatusesAt,
+} from "@/lib/demoRun";
+import { DEMO_RUN_ATTR, DEMO_RUN_CLOCK_ATTR, DEMO_RUN_PLAYING } from "@/lib/demoRunClock";
+import {
+  demoRunKeyframes,
+  demoRunKeyframesCss,
+  demoRunTrack,
+  framePoint,
+} from "@/lib/demoRunKeyframes";
 import { FlagIcon } from "phosphor-svelte";
 
 /**
  * The hero run drawn into `MapFrame`'s loading state, in the positions the
- * live map is about to put it — and in the state the live map *opens* in.
+ * live map puts it — and already playing the replay the live map will carry
+ * on with.
  *
  * This is the difference between a loading frame that shows a city and one
- * that shows *this map*: the same shapes, at the same places, under the frost.
- * When MapLibre finishes and the overlay dissolves, what is underneath is
- * already where the eye left it.
+ * that is *this map*: the same shapes, at the same places, doing the same
+ * thing at the same moment. The replay (`DemoRunMap.svelte`) starts here, as
+ * CSS animations, in the first paint: the line draws itself behind the
+ * runner, each surveyed stop turns and pings as the runner reaches it, and
+ * the stop the run halts at turns blue and starts beckoning. When the live map
+ * is ready it reads when this replay started (`demoRunClock.ts`) and joins it
+ * at the same point, so the frame dissolves off a map that is mid-motion
+ * exactly where the eye left it.
  *
- * What that state is depends on the visitor. The map opens on the first frame
- * of a replay (`DemoRunMap.svelte`): the whole loop faint, every stop pending,
- * the runner at the start, and nothing run yet — so that is what is drawn.
- * Under `prefers-reduced-motion` the replay is skipped and the map opens on its
- * *end* frame instead, so the same markup carries that frame too, switched in
- * by the media query: the run so far drawn solid, the reached stops in their
- * colours, the stop it ends on in the route's blue, the runner where the run
- * ends. Both come from `demoRun.ts`, the
- * same module the replay reads, so the two cannot disagree.
+ * The motion is exact, not sampled (`demoRunKeyframes.ts`), and every timing
+ * comes from `demoRun.ts`, the module the live replay reads, so the two cannot
+ * disagree. Nothing plays until the inline script below says the page is
+ * visible, and under `prefers-reduced-motion` nothing plays at all: the frame
+ * shows the replay's *end* instead, which is what the live map opens on for
+ * that visitor.
  *
  * None of it needs the engine. The opening view is fixed at build time, so a
  * point's offset from the frame's centre is a pure function of its
  * coordinates — see `offsetFromCenter`. This runs at build time and ships as
- * markup.
+ * markup, CSS and a few lines of inline script.
  *
  * Alignment with the thumbnail is exact rather than approximate, and that is
  * what the `viewBox`/`slice` pairing buys: the SVG's user space *is* the
@@ -38,9 +69,11 @@ import { FlagIcon } from "phosphor-svelte";
  */
 
 const variants = MAP_FRAMES["demo-run"].variants;
+const { holdMs, runMs, pulseMs, beckonDelayMs } = DEMO_RUN_TIMING;
 
 /** Trim coordinates to a tenth of a pixel — past that it is bytes in the HTML. */
 const r = (n: number) => Math.round(n * 10) / 10;
+const ms = (n: number) => `${Math.round(n * 100) / 100}ms`;
 
 const openingStatuses = demoStatusesAt(0);
 const endStatuses = demoStatusesAt(DEMO_RUN_END);
@@ -49,47 +82,83 @@ const endStatuses = demoStatusesAt(DEMO_RUN_END);
 const colorFor = (statuses: ReturnType<typeof demoStatusesAt>, id: number, halted: boolean) =>
   demoStopColor(id, statuses[id], halted);
 
+/**
+ * When, in ms after the run sets off, a stop changes colour — a surveyed stop
+ * when the runner reaches it, `DEMO_NEXT_STOP` when the run comes to rest
+ * there — or `null` for a stop that keeps the colour it opens in. A surveyed
+ * stop the run starts on is reached before anything moves, so it opens in its
+ * status and never turns.
+ */
+const turnMs = (id: number): number | null => {
+  if (id === DEMO_NEXT_STOP) return runMs;
+  const arrival = DEMO_ARRIVAL_MS[id];
+  return arrival === undefined || arrival <= 0 ? null : arrival;
+};
+
+const fountainById = new Map(DC_FOUNTAINS.map((f) => [f.id, f]));
+
 const shots = variants.map((variant, index) => {
-  const cx = variant.frame.width / 2;
-  const cy = variant.frame.height / 2;
-  const at = (point: { lat: number; lon: number }) => {
-    const offset = offsetFromCenter(point, variant);
-    return { x: r(cx + offset.x), y: r(cy + offset.y) };
-  };
-  const points = (route: [number, number][]) =>
-    route
-      .map(([lat, lon]) => at({ lat, lon }))
-      .map(({ x, y }) => `${x},${y}`)
-      .join(" ");
-  const runnerAt = (length: number) => {
-    const [lat, lon] = demoRunnerAt(length);
-    return at({ lat, lon });
-  };
+  const id = `demo-run-${index}`;
+  const track = demoRunTrack(variant);
+  const keyframes = demoRunKeyframes(variant);
+  const polyline = (points: { x: number; y: number }[]) =>
+    points.map(({ x, y }) => `${x},${y}`).join(" ");
+  const start = track.points[0];
+  const end = track.points[track.points.length - 1];
+  const nextStop = framePoint(variant, fountainById.get(DEMO_NEXT_STOP)!);
+  // The dash that reveals the run: as long as the drawn line, hidden by an
+  // offset of that same length at the start. The first keyframe's offset, so
+  // the two cannot disagree by a rounding.
+  const runLength = keyframes[0].dash;
+  const playing = `[${DEMO_RUN_ATTR}="${DEMO_RUN_PLAYING}"] [data-map-shot="${id}"]`;
 
   return {
-    id: `demo-run-${index}`,
+    id,
     media: variant.media,
     viewBox: `0 0 ${variant.frame.width} ${variant.frame.height}`,
-    loop: points(DC_ROUTE),
-    run: points(demoRouteRunBy(DEMO_RUN_END)),
+    loop: polyline(DC_ROUTE.map(([lat, lon]) => framePoint(variant, { lat, lon }))),
+    run: polyline(track.points),
+    runStyle: `--run-length:${runLength};--run-gap:${runLength + 1}`,
+    // The runner's transform at the start of the run and at its end.
+    runnerStyle:
+      `--route-line-color:${ROUTE_LINE.color};` +
+      `--from:translate(${start.x}px,${start.y}px);--to:translate(${end.x}px,${end.y}px)`,
     // Where the flag's `<svg>` goes so the base of its pole is on the
     // route's first vertex (`START_FLAG.pole`).
     flag: (() => {
       const [lat, lon] = DC_ROUTE[0];
-      const { x, y } = at({ lat, lon });
+      const { x, y } = framePoint(variant, { lat, lon });
       return {
         x: r(x - START_FLAG.px * START_FLAG.pole.x),
         y: r(y - START_FLAG.px * START_FLAG.pole.y),
       };
     })(),
-    runnerStart: runnerAt(0),
-    runnerEnd: runnerAt(DEMO_RUN_END),
-    stops: DC_FOUNTAINS.map((fountain, i) => ({
-      ...at(fountain),
-      label: String(i + 1),
-      color: colorFor(openingStatuses, fountain.id, false),
-      endColor: colorFor(endStatuses, fountain.id, true),
+    stops: DC_FOUNTAINS.map((fountain, i) => {
+      const turn = turnMs(fountain.id);
+      const turnDelay = turn === null ? null : ms(holdMs + turn);
+      return {
+        ...framePoint(variant, fountain),
+        label: String(i + 1),
+        turns: turnDelay !== null,
+        style:
+          `--start:${colorFor(openingStatuses, fountain.id, false)};` +
+          `--end:${colorFor(endStatuses, fountain.id, true)}` +
+          (turnDelay === null ? "" : `;--turn-delay:${turnDelay}`),
+        labelStyle: turnDelay === null ? undefined : `--turn-delay:${turnDelay}`,
+      };
+    }),
+    pings: DEMO_SEEDED_IN_ORDER.map((stopId) => ({
+      ...framePoint(variant, fountainById.get(stopId)!),
+      color: demoStopColor(stopId, SEED_STATUSES[stopId], false),
+      style: `--ping-delay:${ms(holdMs + DEMO_ARRIVAL_MS[stopId])}`,
     })),
+    beckonStyle: `left:${nextStop.x}px;top:${nextStop.y}px`,
+    // The run itself, per shot: its keyframes are in this shot's pixels.
+    css:
+      demoRunKeyframesCss(id, keyframes) +
+      `@media (prefers-reduced-motion: no-preference){` +
+      `${playing} .demo-route__runner{animation:${id}-runner ${runMs}ms linear ${holdMs}ms both}` +
+      `${playing} .demo-route__run{animation:${id}-line ${runMs}ms linear ${holdMs}ms both}}`,
   };
 });
 
@@ -98,105 +167,206 @@ const shots = variants.map((variant, index) => {
 // Generated from the variants rather than written out, so the query lives in
 // `frames.ts` only — a breakpoint that drifted would show the route for one
 // zoom over a picture rendered at the other.
+//
+// By `visibility`, not `display`: a CSS animation does not run on an element
+// that is not rendered, so a shot switched off by `display` would start its
+// replay from the beginning the moment a resize switched it on — out of step
+// with the clock. Hidden, it keeps time with the shown one.
 const fallback = shots.find((s) => s.media === null) ?? shots[shots.length - 1];
-const mediaCss = shots
-  .filter((s) => s.media !== null)
-  .map(
-    (s) =>
-      `@media ${s.media}{[data-map-shot="${fallback.id}"]{display:none}` +
-      `[data-map-shot="${s.id}"]{display:block}}`,
-  )
-  .join("");
-const css = `[data-map-shot]{display:none}[data-map-shot="${fallback.id}"]{display:block}${mediaCss}`;
+const shotCss =
+  `[data-map-shot]{visibility:hidden}[data-map-shot="${fallback.id}"]{visibility:visible}` +
+  shots
+    .filter((s) => s.media !== null)
+    .map(
+      (s) =>
+        `@media ${s.media}{[data-map-shot="${fallback.id}"]{visibility:hidden}` +
+        `[data-map-shot="${s.id}"]{visibility:visible}}`,
+    )
+    .join("");
+// The motion shared by every shot, gated on the replay being allowed to play.
+// Written here rather than in the style block so the attribute it is gated on
+// is `demoRunClock.ts`'s, not a copy of it.
+const root = `[${DEMO_RUN_ATTR}="${DEMO_RUN_PLAYING}"]`;
+const motionCss =
+  `@media (prefers-reduced-motion: no-preference){` +
+  `${root} .demo-run__clock{animation:demo-run-clock var(--clock-ms) linear both}` +
+  `${root} .demo-route__stop--turns{animation:demo-route-turn 0s linear var(--turn-delay) both}` +
+  // The live map's label pop (`.marker-pop-label` in globals.css), replayed
+  // when the stop turns. No fill: the label stays drawn until its delay is up.
+  `${root} .demo-route__label--turns{animation:marker-pop 320ms cubic-bezier(0.34,1.56,0.64,1) var(--turn-delay)}` +
+  `${root} .demo-route__ping{animation:demo-route-ping var(--ping-ms) linear var(--ping-delay)}` +
+  `${root} .demo-route__beckon{display:block}}`;
+const css = shotCss + motionCss + shots.map((s) => s.css).join("");
+
+const rootAttrs = { [DEMO_RUN_ATTR]: "" };
+const clockAttrs = { [DEMO_RUN_CLOCK_ATTR]: "" };
+const rootStyle =
+  `--clock-ms:${holdMs + runMs}ms;--ping-ms:${pulseMs}ms;` +
+  `--ping-scale:${1 + PULSE_GROWTH};--ping-opacity:${PULSE_OPACITY}`;
 ---
 
-{
-  shots.map((shot) => (
-    <svg
-      class="demo-route"
-      data-map-shot={shot.id}
-      viewBox={shot.viewBox}
-      preserveAspectRatio="xMidYMid slice"
-      aria-hidden="true"
-    >
-      {/* The whole loop, faint: the plan. Same blue, width and joins as the
-          live map's `lineUpcoming` layer. */}
-      <polyline
-        points={shot.loop}
-        fill="none"
-        stroke={ROUTE_LINE.color}
-        stroke-width={ROUTE_LINE.width}
-        stroke-opacity={ROUTE_LINE.upcomingOpacity}
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      />
-      {/* The run so far, solid — the end frame's, shown only under reduced
-          motion (see the style block). */}
-      <polyline
-        class="demo-route__run"
-        points={shot.run}
-        fill="none"
-        stroke={ROUTE_LINE.color}
-        stroke-width={ROUTE_LINE.width}
-        stroke-opacity={ROUTE_LINE.opacity}
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      />
-      {/* The runner: MapView's runner layer, a 14px disc with a 2.5px white
-          ring. An SVG stroke straddles the edge, so the radius is pulled in
-          by half the ring to land on the same outline. Before the stops, as
-          the live map draws it under them: at the start it sits beneath the
-          first stop, and in the end frame — swapped in under reduced motion —
-          beneath the stop the run ends on. */}
-      <circle
-        class="demo-route__runner demo-route__runner--start"
-        cx={shot.runnerStart.x}
-        cy={shot.runnerStart.y}
-        r="5.75"
-        style={`--route-line-color:${ROUTE_LINE.color}`}
-      />
-      <circle
-        class="demo-route__runner demo-route__runner--end"
-        cx={shot.runnerEnd.x}
-        cy={shot.runnerEnd.y}
-        r="5.75"
-        style={`--route-line-color:${ROUTE_LINE.color}`}
-      />
-      {shot.stops.map((stop) => (
-        <g>
-          {/* `markerRadius` 9 with a 2px white ring — `MapView`'s defaults, which
-              the hero map does not override. The fill is the opening colour;
-              `--end` is what the reduced-motion end frame swaps in. */}
-          <circle
-            cx={stop.x}
-            cy={stop.y}
-            r="9"
-            class="demo-route__stop"
-            style={`--start:${stop.color};--end:${stop.endColor}`}
-            stroke="#fff"
-            stroke-width="2"
+<div class="demo-run" style={rootStyle} {...rootAttrs}>
+  {
+    /* The replay's clock (`demoRunClock.ts`): an animation that does nothing
+      but start with the rest, so the live map can read when they did. Not
+      `hidden` — an element that is not rendered runs no animations. */
+  }
+  <span class="demo-run__clock" aria-hidden="true" {...clockAttrs}></span>
+  {
+    shots.map((shot) => (
+      <div class="demo-route" data-map-shot={shot.id}>
+        <svg
+          class="demo-route__svg"
+          viewBox={shot.viewBox}
+          preserveAspectRatio="xMidYMid slice"
+          aria-hidden="true"
+        >
+          {/* The whole loop, faint: the plan. Same blue, width and joins as the
+              live map's `lineUpcoming` layer. */}
+          <polyline
+            points={shot.loop}
+            fill="none"
+            stroke={ROUTE_LINE.color}
+            stroke-width={ROUTE_LINE.width}
+            stroke-opacity={ROUTE_LINE.upcomingOpacity}
+            stroke-linecap="round"
+            stroke-linejoin="round"
           />
-          <text x={stop.x} y={stop.y} class="demo-route__label">
-            {stop.label}
-          </text>
-        </g>
-      ))}
-      {/* The start flag: the same phosphor glyph the live map plants, drawn
-          here at build time. Last, so it is over the runner that starts
-          beneath it, as the live map's DOM marker is over the canvas. */}
-      <g class="demo-route__flag" transform={`translate(${shot.flag.x} ${shot.flag.y})`}>
-        <FlagIcon size={START_FLAG.px} weight="fill" color={START_FLAG.color} />
-      </g>
-    </svg>
-  ))
+          {/* The run, solid, revealed by its dash as the runner goes. Butt-capped:
+              the live map's drawn line ends in a gradient at the runner, not a
+              round cap, and its start is under the flag. */}
+          <polyline
+            class="demo-route__run"
+            points={shot.run}
+            style={shot.runStyle}
+            fill="none"
+            stroke={ROUTE_LINE.color}
+            stroke-width={ROUTE_LINE.width}
+            stroke-opacity={ROUTE_LINE.opacity}
+            stroke-linecap="butt"
+            stroke-linejoin="round"
+          />
+          {/* Each surveyed stop's ping: a ring in its colour that grows out from
+              under the dot as the runner arrives — MapView's pulse layer, which
+              sits over the line and under the runner. */}
+          {shot.pings.map((ping) => (
+            <circle
+              class="demo-route__ping"
+              cx={ping.x}
+              cy={ping.y}
+              r={DEFAULT_MARKER_RADIUS}
+              fill={ping.color}
+              style={ping.style}
+            />
+          ))}
+          {/* The runner: MapView's runner layer. MapLibre strokes a circle
+              outside its radius and an SVG stroke straddles the edge, so the
+              radius is pushed out by half the ring to land on the same outline.
+              Drawn at the origin and placed by its transform — the start, the
+              animation, or under reduced motion the end. Before the stops, as the
+              live map draws it under them. */}
+          <circle
+            class="demo-route__runner"
+            r={RUNNER_DOT.radius + RUNNER_DOT.stroke / 2}
+            stroke-width={RUNNER_DOT.stroke}
+            style={shot.runnerStyle}
+          />
+          {shot.stops.map((stop) => (
+            <g>
+              {/* `markerRadius` with its white ring — `MapView`'s defaults, which
+                  the hero map does not override — pushed out by half the ring
+                  as the runner is. The fill is the opening colour; `--end` is
+                  the colour it turns, and the end frame's. */}
+              <circle
+                cx={stop.x}
+                cy={stop.y}
+                r={DEFAULT_MARKER_RADIUS + MARKER_STROKE_PX / 2}
+                class:list={["demo-route__stop", stop.turns && "demo-route__stop--turns"]}
+                style={stop.style}
+                stroke="#fff"
+                stroke-width={MARKER_STROKE_PX}
+              />
+              <text
+                x={stop.x}
+                y={stop.y}
+                class:list={["demo-route__label", stop.turns && "demo-route__label--turns"]}
+                style={stop.labelStyle}
+              >
+                {stop.label}
+              </text>
+            </g>
+          ))}
+          {/* The start flag: the same phosphor glyph the live map plants, drawn
+              here at build time. Last, so it is over the runner that starts
+              beneath it, as the live map's DOM marker is over the canvas. */}
+          <g class="demo-route__flag" transform={`translate(${shot.flag.x} ${shot.flag.y})`}>
+            <FlagIcon size={START_FLAG.px} weight="fill" color={START_FLAG.color} />
+          </g>
+        </svg>
+        {/* The stop the run halts at, beckoning: the live map's own beckon, set
+            to start when the run has come to rest there. */}
+        <div class="demo-route__beckon" style={shot.beckonStyle}>
+          <Beckon
+            color={ROUTE_LINE.color}
+            dotR={DEFAULT_MARKER_RADIUS + MARKER_STROKE_PX}
+            reachPx={BECKON_REACH_PX}
+            delayMs={holdMs + runMs + beckonDelayMs}
+          />
+        </div>
+      </div>
+    ))
+  }
+</div>
+
+{
+  /* Lets the replay play, once the page is visible. Inline, so it runs as the
+    frame is parsed — no fetch between the first paint and the run setting off.
+    A background tab waits until it is shown. Without script the frame simply
+    holds its opening. */
 }
+<script is:inline define:vars={{ attr: DEMO_RUN_ATTR, playing: DEMO_RUN_PLAYING }}>
+  const play = () => {
+    if (document.visibilityState === "hidden") {
+      document.addEventListener("visibilitychange", play, { once: true });
+      return;
+    }
+    for (const el of document.querySelectorAll(`[${attr}]`)) el.setAttribute(attr, playing);
+  };
+  play();
+</script>
 
 <style>
-  .demo-route {
+  .demo-run,
+  .demo-route,
+  .demo-route__svg {
     position: absolute;
     inset: 0;
     width: 100%;
     height: 100%;
+  }
+
+  .demo-run__clock {
+    position: absolute;
+    width: 0;
+    height: 0;
+    visibility: hidden;
+  }
+
+  .demo-route__run {
+    stroke-dasharray: var(--run-length) var(--run-gap);
+    stroke-dashoffset: var(--run-length);
+  }
+
+  .demo-route__ping {
+    opacity: 0;
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+
+  .demo-route__runner {
+    fill: var(--route-line-color);
+    stroke: #fff;
+    transform: var(--from);
   }
 
   .demo-route__stop {
@@ -212,33 +382,76 @@ const css = `[data-map-shot]{display:none}[data-map-shot="${fallback.id}"]{displ
     dominant-baseline: central;
   }
 
+  .demo-route__label--turns {
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+
   /* Haloed in white like the stops' rings — MapView's `.start-flag`. */
   .demo-route__flag {
     filter: drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff)
       drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35));
   }
 
-  .demo-route__runner {
-    fill: var(--route-line-color);
-    stroke: #fff;
-    stroke-width: 2.5;
+  /* A point, not a box: the beckon draws from its own origin. Not rendered —
+     and so not started — until the replay plays (see the generated block), or
+     at once under reduced motion, where it is a still wave. */
+  .demo-route__beckon {
+    position: absolute;
+    width: 0;
+    height: 0;
+    display: none;
   }
 
   /* The replay's end frame, for a visitor who will not see the replay. */
-  .demo-route__run,
-  .demo-route__runner--end {
-    display: none;
-  }
   @media (prefers-reduced-motion: reduce) {
-    .demo-route__run,
-    .demo-route__runner--end {
-      display: initial;
+    .demo-route__run {
+      stroke-dasharray: none;
+      stroke-dashoffset: 0;
     }
-    .demo-route__runner--start {
-      display: none;
+    .demo-route__runner {
+      transform: var(--to);
     }
     .demo-route__stop {
       fill: var(--end);
+    }
+    .demo-route__beckon {
+      display: block;
+    }
+  }
+</style>
+
+<style is:global>
+  /* Global, as the rules that run them are (the generated block): an
+     animation name resolves against keyframes wherever they are declared, and
+     keeping both sides out of scoping leaves nothing to rename. */
+  @keyframes demo-run-clock {
+    from,
+    to {
+      opacity: 0;
+    }
+  }
+
+  @keyframes demo-route-turn {
+    from {
+      fill: var(--start);
+    }
+    to {
+      fill: var(--end);
+    }
+  }
+
+  /* MapView's `pulsePaint`: the ring grows from the dot's radius by
+     `PULSE_GROWTH` of it and thins from `PULSE_OPACITY` to nothing, both
+     linearly. */
+  @keyframes demo-route-ping {
+    from {
+      transform: scale(1);
+      opacity: var(--ping-opacity);
+    }
+    to {
+      transform: scale(var(--ping-scale));
+      opacity: 0;
     }
   }
 </style>

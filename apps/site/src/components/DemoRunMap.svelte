@@ -1,5 +1,5 @@
 <script lang="ts">
-  import MapView, { pulseVisibleAt, type MapMarker } from "@/components/MapView.svelte";
+  import MapView, { type MapMarker } from "@/components/MapView.svelte";
   import PointPopup, { type PointEdit } from "@/components/PointPopup.svelte";
   import type { EditAction, EditExtras, Fountain } from "@rosm/core/schemas";
   import type { StopStatus } from "@rosm/core/stores/run";
@@ -15,28 +15,37 @@
   } from "@/lib/demoRoute";
   import {
     DEMO_ARRIVALS,
-    DEMO_CHECKPOINTS,
+    DEMO_ARRIVAL_MS,
+    DEMO_LEGS,
     DEMO_ROUTE_LENGTHS,
+    DEMO_RUN_TIMING,
     DEMO_SEEDED_IN_ORDER,
     demoRunnerAt,
   } from "@/lib/demoRun";
-  import { arrivalMs, legSchedule, lengthAt } from "@/lib/runReplay";
+  import { runOrigin } from "@/lib/demoRunClock";
+  import { lengthAt } from "@/lib/runReplay";
 
   // Interactive replica of the run screen for the landing hero. Every tap flows
   // through the real PointPopup, but edits only touch local state — nothing is
   // sent to OSM, queued in the outbox, or persisted anywhere.
   //
-  // On load it replays the run so far: the line draws itself from the first
-  // stop with the runner at its tip, slowing into each surveyed stop — which
-  // flips from pending to its status as the runner reaches it — and setting
-  // off again, until it halts at the next stop (`DEMO_NEXT_STOP`, at
-  // `DEMO_RUN_END`) with the rest of the loop left faint as the plan. The
-  // moment it stops there, that stop starts pinging, unmarked, and keeps on
-  // until the visitor opens it: the run is handed over exactly where a runner
-  // would reach for their phone, but the tap is left to the visitor — an
-  // invitation to try the map rather than a popup already answering for them.
-  // The replay is presentation only; the seeded statuses it reveals are the
-  // same ones the map used to show from the first frame.
+  // It replays the run so far: the line draws itself from the first stop with
+  // the runner at its tip, slowing into each surveyed stop — which flips from
+  // pending to its status as the runner reaches it — and setting off again,
+  // until it halts at the next stop (`DEMO_NEXT_STOP`, at `DEMO_RUN_END`) with
+  // the rest of the loop left faint as the plan. The moment it stops there,
+  // that stop starts beckoning, unmarked, and keeps on until the visitor opens
+  // it: the run is handed over exactly where a runner would reach for their
+  // phone, but the tap is left to the visitor — an invitation to try the map
+  // rather than a popup already answering for them.
+  //
+  // The replay does not start here. It starts in the map's loading frame
+  // (`DemoRoutePlaceholder.astro`), as CSS, the moment the page paints — this
+  // island and MapLibre can arrive seconds later — and this island joins it
+  // wherever it has got to (`demoRunClock.ts`), so the frame dissolves off a
+  // live map at the same point in the run. The replay is presentation only;
+  // the seeded statuses it reveals are the same ones the map used to show
+  // from the first frame.
   let { class: className = "" }: { class?: string } = $props();
 
   // The opening view is initial-only, so pick it once at mount. Read from the
@@ -47,45 +56,19 @@
   // map (see `frames.ts`).
   const { center, zoom } = openingViewForViewport("demo-run");
 
+  const { holdMs, runMs, pulseMs, beckonDelayMs } = DEMO_RUN_TIMING;
+  /** When, in ms after the run sets off, `DEMO_NEXT_STOP` starts beckoning. */
+  const BECKON_AT_MS = runMs + beckonDelayMs;
   /**
-   * How long the replay takes to run from the first stop to `DEMO_RUN_END`.
-   * Short: the hero's copy is what the visitor came for, and the stop left
-   * pinging at the end is the replay's point, so the run is a prelude, not a
-   * feature.
+   * How long the clock keeps ticking, in ms after the run sets off: until the
+   * last thing it times — the run's end, the last ping's end, the beckon's
+   * start — is behind it.
    */
-  const RUN_MS = 2200;
-  /**
-   * Pause between the map being ready and the replay starting: a beat of
-   * settled map before anything on it moves.
-   */
-  const HOLD_MS = 400;
-  /** How long a stop's ping lasts once the runner reaches it. */
-  const PULSE_MS = 550;
-  /**
-   * How long after the runner halts at `DEMO_NEXT_STOP` its beckon starts.
-   *
-   * Every surveyed stop changes colour the moment the runner reaches it and
-   * pings from that moment too — but a ping's ring grows out from under the
-   * dot, so it is first seen only once it has cleared the dot's white ring
-   * (`pulseVisibleAt`). A beckon's first wave shows from its first frame.
-   * Started on arrival it would lead every ping before it by that hidden
-   * stretch; started this much later, `DEMO_NEXT_STOP` turns blue on arrival
-   * like the others and its wave shows when a ping's ring would have.
-   */
-  const BECKON_DELAY_MS = PULSE_MS * pulseVisibleAt();
-
-  /**
-   * The replay's clock: one leg per stretch between checkpoints, each eased
-   * in and out so the runner leaves a stop, gets up to pace, and slows into
-   * the next (`runReplay.ts`). The time is shared out by distance, so the
-   * pace is the same on every leg.
-   */
-  const LEGS = legSchedule(DEMO_CHECKPOINTS, RUN_MS);
-
-  /** When, in ms after the replay starts, the runner reaches each surveyed stop. */
-  const ARRIVAL_MS: Record<number, number> = Object.fromEntries(
-    DEMO_SEEDED_IN_ORDER.map((id) => [id, arrivalMs(LEGS, DEMO_ARRIVALS[id]) ?? 0]),
+  const CLOCK_END_MS = Math.max(
+    BECKON_AT_MS,
+    ...DEMO_SEEDED_IN_ORDER.map((id) => DEMO_ARRIVAL_MS[id] + pulseMs),
   );
+  const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
   const seededEdit = (id: number): PointEdit => ({
     status: SEED_STATUSES[id],
@@ -97,49 +80,60 @@
     DEMO_SEEDED_IN_ORDER.map((id) => [id, seededEdit(id)]),
   );
 
-  // The replay's clock. `idle` until the map is ready and the hold has
-  // passed, `running` while the line draws, `done` after — or at once, under
+  // The replay's clock. `origin` is when it started, as a `performance.now()`
+  // time; `elapsed` is how far the run is past setting off, negative through
+  // the opening hold. The phase follows from it: `idle` until the run sets
+  // off, `running` while the line draws, `done` after — or at once, under
   // reduced motion, in which case the map opens on the end frame. The map is
   // locked (`interactive`) until `done`: a visitor who dragged or tapped
   // mid-replay would be fighting the camera and the stops still flipping.
-  let phase = $state<"idle" | "running" | "done">("idle");
-  let elapsed = $state(0);
+  let origin = $state<number | null>(null);
+  let elapsed = $state(reducedMotion ? CLOCK_END_MS : -holdMs);
+  const phase = $derived(elapsed >= runMs ? "done" : elapsed > 0 ? "running" : "idle");
+
+  let root = $state<HTMLDivElement>();
+  // Whether there is a replay in the loading frame to follow: `undefined`
+  // while that is still being asked, `false` for none — no frame, or one
+  // already retired — in which case the clock starts here instead.
+  let followingFrame = $state<boolean | undefined>(undefined);
   let ready = $state(false);
 
   $effect(() => {
-    if (!ready || phase !== "idle") return;
-    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
-      phase = "done";
-      return;
-    }
-    // A replay in a background tab would run unseen and be over by the time
-    // the visitor came back; wait for the tab instead.
+    const el = root;
+    if (!el || reducedMotion) return;
+    let current = true;
+    void runOrigin(el).then((startedAt) => {
+      if (!current) return;
+      followingFrame = startedAt !== null;
+      if (startedAt !== null) origin = startedAt;
+    });
+    return () => {
+      current = false;
+    };
+  });
+
+  // No frame to follow: the clock starts once the map is ready and the tab is
+  // visible — a replay in a background tab would run unseen and be over by
+  // the time the visitor came back.
+  $effect(() => {
+    if (followingFrame !== false || !ready || origin !== null) return;
     const start = () => {
       if (document.visibilityState === "hidden") {
         document.addEventListener("visibilitychange", start, { once: true });
         return;
       }
-      phase = "running";
+      origin = performance.now();
     };
-    const timer = setTimeout(start, HOLD_MS);
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener("visibilitychange", start);
-    };
+    start();
+    return () => document.removeEventListener("visibilitychange", start);
   });
 
   $effect(() => {
-    if (phase !== "running") return;
-    const startedAt = performance.now();
+    const from = origin;
+    if (from === null) return;
     let raf = requestAnimationFrame(function tick(now) {
-      const t = now - startedAt;
-      if (t >= RUN_MS) {
-        elapsed = RUN_MS;
-        phase = "done";
-        return;
-      }
-      elapsed = t;
-      raf = requestAnimationFrame(tick);
+      elapsed = Math.min(now - from - holdMs, CLOCK_END_MS);
+      if (elapsed < CLOCK_END_MS) raf = requestAnimationFrame(tick);
     });
     return () => cancelAnimationFrame(raf);
   });
@@ -161,25 +155,22 @@
   // Whether the run has come to rest at `DEMO_NEXT_STOP`, which from then
   // until the visitor marks it wears the route's blue (`demoStopColor`). A
   // boolean of its own, so what hangs off it — `markers` above all — is
-  // rebuilt once when it flips rather than on every change of `phase`.
+  // rebuilt once when it flips rather than on every frame of the clock.
   const halted = $derived(phase === "done");
 
-  // `DEMO_NEXT_STOP` beckons (MapView's `beckon`) from `BECKON_DELAY_MS` after
-  // the runner comes to rest there — under reduced motion, after the end
-  // frame the map opens on — until the visitor opens it. The loop itself is
-  // CSS; the only clock here is the wait before it starts.
-  let beckonDue = $state(false);
-  $effect(() => {
-    if (!halted) return;
-    const timer = setTimeout(() => (beckonDue = true), BECKON_DELAY_MS);
-    return () => clearTimeout(timer);
-  });
-  const beckon = $derived(beckonDue && !opened ? String(DEMO_NEXT_STOP) : null);
+  // `DEMO_NEXT_STOP` beckons (MapView's `beckon`) from `beckonDelayMs` after
+  // the runner comes to rest there — under reduced motion, from the end frame
+  // the map opens on — until the visitor opens it. The loop itself is CSS.
+  const beckon = $derived(elapsed >= BECKON_AT_MS && !opened ? String(DEMO_NEXT_STOP) : null);
+  // When the beckon's loop began. The loading frame starts the same loop on
+  // the same clock, so a live beckon mounted after it joins that loop in step
+  // rather than starting a loop of its own.
+  const beckonSince = $derived(origin === null ? undefined : origin + holdMs + BECKON_AT_MS);
 
   // Per-frame values. Everything the map redraws every frame hangs off these
   // and *only* these — see `markers` below for what must not.
-  const runElapsed = $derived(phase === "done" ? RUN_MS : phase === "idle" ? 0 : elapsed);
-  const runLength = $derived(lengthAt(LEGS, runElapsed));
+  const runElapsed = $derived(Math.max(0, Math.min(runMs, elapsed)));
+  const runLength = $derived(lengthAt(DEMO_LEGS, runElapsed));
   const lineProgress = $derived(runLength / DEMO_ROUTE_LENGTHS.total);
   const runner = $derived(demoRunnerAt(runLength));
 
@@ -247,21 +238,22 @@
   );
 
   // The ping each surveyed stop gives off as the runner reaches it: id → how
-  // far through its ping it is. The same object whenever nothing is pinging,
+  // far through its ping it is. Timed off the clock alone, not the phase, so
+  // a ping that runs past the end of the run is not cut short — the loading
+  // frame's own pings are not. The same object whenever nothing is pinging,
   // so MapView's feature-state effect has nothing to do on those frames.
   const NO_PULSES: Record<string, number> = {};
   const pulses = $derived.by<Record<string, number>>(() => {
-    if (phase !== "running") return NO_PULSES;
     let out: Record<string, number> | undefined;
     for (const id of DEMO_SEEDED_IN_ORDER) {
-      const t = (elapsed - ARRIVAL_MS[id]) / PULSE_MS;
+      const t = (elapsed - DEMO_ARRIVAL_MS[id]) / pulseMs;
       if (t > 0 && t < 1) (out ??= {})[String(id)] = t;
     }
     return out ?? NO_PULSES;
   });
 </script>
 
-<div class="relative h-full w-full {className}">
+<div bind:this={root} class="relative h-full w-full {className}">
   <MapView
     class="hero-map"
     {center}
@@ -278,6 +270,8 @@
     {markers}
     {pulses}
     {beckon}
+    {beckonSince}
+    popInOnLoad={false}
     centerOnSelect
     bind:selected={() => selected, select}
     hidePlaceLabels

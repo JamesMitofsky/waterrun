@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { arrivalMs, easeInOut, legSchedule, lengthAt } from "@/lib/runReplay";
+import {
+  arrivalMs,
+  easeInOut,
+  easedSegments,
+  legSchedule,
+  lengthAt,
+  timeAt,
+  type EasedSegment,
+} from "@/lib/runReplay";
 
 describe("easeInOut", () => {
   it("is at rest at both ends and halfway in the middle", () => {
@@ -104,5 +112,76 @@ describe("arrivalMs", () => {
   it("is undefined off a checkpoint or with no legs", () => {
     expect(arrivalMs(legs, 20)).toBeUndefined();
     expect(arrivalMs([], 0)).toBeUndefined();
+  });
+});
+
+describe("timeAt", () => {
+  const legs = legSchedule([0, 10, 40], 1000);
+
+  it("undoes lengthAt", () => {
+    for (let ms = 0; ms <= 1000; ms += 13) {
+      expect(timeAt(legs, lengthAt(legs, ms))).toBeCloseTo(ms, 4);
+    }
+  });
+
+  it("is a checkpoint's arrival at that checkpoint", () => {
+    expect(timeAt(legs, 10)).toBe(250);
+    expect(timeAt(legs, 25)).toBeCloseTo(625, 9);
+  });
+
+  it("clamps to the schedule's ends", () => {
+    expect(timeAt(legs, -1)).toBe(0);
+    expect(timeAt(legs, 99)).toBe(1000);
+    expect(timeAt([], 5)).toBe(0);
+  });
+});
+
+describe("easedSegments", () => {
+  const legs = legSchedule([0, 10, 40], 1000);
+  // y at s along a `cubic-bezier` whose x control points are 1/3 and 2/3, so
+  // x(t) = t and s is the curve's own parameter.
+  const bezierY = ([, y1, , y2]: EasedSegment["bezier"], s: number) =>
+    3 * (1 - s) ** 2 * s * y1 + 3 * (1 - s) * s ** 2 * y2 + s ** 3;
+
+  it("tiles the schedule end to end, in time and in length", () => {
+    const segments = easedSegments(legs, [2, 30]);
+    expect(segments[0].fromMs).toBe(0);
+    expect(segments[0].fromLen).toBe(0);
+    expect(segments[segments.length - 1].toMs).toBe(1000);
+    expect(segments[segments.length - 1].toLen).toBe(40);
+    for (let i = 1; i < segments.length; i++) {
+      expect(segments[i].fromMs).toBeCloseTo(segments[i - 1].toMs, 9);
+      expect(segments[i].fromLen).toBeCloseTo(segments[i - 1].toLen, 9);
+    }
+  });
+
+  it("cuts every leg at its midpoint and at each break inside it", () => {
+    const cutsAt = easedSegments(legs, [2, 10, 30, 50]).map((s) => s.fromMs);
+    expect(cutsAt).toHaveLength(6);
+    expect(cutsAt).toContain(125);
+    expect(cutsAt).toContain(625);
+    expect(cutsAt.some((ms) => Math.abs(ms - timeAt(legs, 2)) < 1e-9)).toBe(true);
+    expect(cutsAt.some((ms) => Math.abs(ms - timeAt(legs, 30)) < 1e-9)).toBe(true);
+  });
+
+  it("does not cut twice where a break lands on a midpoint", () => {
+    expect(easedSegments(legs, [5])).toHaveLength(4);
+  });
+
+  it("keeps x linear, so each curve is a function of time alone", () => {
+    for (const { bezier } of easedSegments(legs, [2, 30])) {
+      expect(bezier[0]).toBe(1 / 3);
+      expect(bezier[2]).toBe(2 / 3);
+    }
+  });
+
+  it("moves exactly as lengthAt does, not only at its ends", () => {
+    for (const seg of easedSegments(legs, [2, 7, 30])) {
+      for (let s = 0; s <= 1; s += 0.05) {
+        const ms = seg.fromMs + s * (seg.toMs - seg.fromMs);
+        const played = seg.fromLen + (seg.toLen - seg.fromLen) * bezierY(seg.bezier, s);
+        expect(Math.abs(played - lengthAt(legs, ms))).toBeLessThan(1e-9);
+      }
+    }
   });
 });
