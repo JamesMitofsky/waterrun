@@ -14,7 +14,7 @@ import {
 } from "@maplibre/maplibre-react-native";
 import { CrosshairSimpleIcon } from "phosphor-react-native/src/icons/CrosshairSimple";
 import type { Feature, FeatureCollection, Point } from "geojson";
-import { FRAME_MARGIN, frameBounds } from "@rosm/core/mapFrame";
+import { FRAME_MARGIN, frameBounds } from "@water-run/core/mapFrame";
 import { OSM_STYLE_JSON } from "./style";
 
 // Layer id for the marker dots.
@@ -34,7 +34,7 @@ export const LOCATION_BUTTON_BOTTOM = LOCATION_BUTTON_TOP + LOCATION_BUTTON_SIZE
 
 // Marker data only — screens attach their own action UI on press (Leaflet-style
 // popups can't ride through GeoJSON). Mirrors the web MapView marker shape.
-export type RosmMarker = {
+export type MapMarker = {
   id: number | string;
   lat: number;
   lon: number;
@@ -58,7 +58,7 @@ type RegionEvent = {
 };
 
 // Viewport after the user pans/zooms, in the [lat, lon] convention this map uses.
-export type RosmRegion = {
+export type MapRegion = {
   center: [number, number]; // [lat, lon]
   zoom: number;
   bounds: [number, number, number, number]; // [w, s, e, n]
@@ -68,14 +68,14 @@ type Props = {
   // Where the map opens, and where each new `recenterKey` moves it.
   center: [number, number]; // [lat, lon]
   zoom?: number;
-  markers?: RosmMarker[];
+  markers?: MapMarker[];
   line?: [number, number][]; // [lat, lon][]
   // The device's own location, drawn natively (a blue dot with a heading cone).
   showUserLocation?: boolean;
-  onMarkerPress?: (id: RosmMarker["id"]) => void;
+  onMarkerPress?: (id: MapMarker["id"]) => void;
   onMapPress?: (lat: number, lon: number) => void;
   // Fires after a user-driven pan/zoom settles (not programmatic camera moves).
-  onRegionChange?: (region: RosmRegion) => void;
+  onRegionChange?: (region: MapRegion) => void;
   // Fires as the user starts moving the map, before it settles: a caller that
   // would move the camera itself can stand down while the finger is down.
   onUserMove?: () => void;
@@ -93,7 +93,7 @@ type Props = {
   style?: ViewStyle;
 };
 
-const markerFeatures = (markers: RosmMarker[]): FeatureCollection<Point> => ({
+const markerFeatures = (markers: MapMarker[]): FeatureCollection<Point> => ({
   type: "FeatureCollection",
   features: markers.map((m): Feature<Point> => ({
     type: "Feature",
@@ -157,9 +157,9 @@ const MARKER_LAYERS = [
 // Resolve a tapped marker id back to the caller's original type. Marker ids are
 // stringified into GeoJSON properties, so a numeric id comes back as a string —
 // coerce it so `f.id === id` comparisons on the caller side still match.
-const resolveId = (raw: string): RosmMarker["id"] => (/^-?\d+$/.test(raw) ? Number(raw) : raw);
+const resolveId = (raw: string): MapMarker["id"] => (/^-?\d+$/.test(raw) ? Number(raw) : raw);
 
-export function RosmMap({
+export function WaterRunMap({
   center,
   zoom = 15,
   markers = [],

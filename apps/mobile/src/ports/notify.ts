@@ -1,7 +1,11 @@
 import { AppState, Platform, type NativeEventSubscription } from "react-native";
 import * as Notifications from "expo-notifications";
-import { metersToFeet } from "@rosm/core/geo";
-import { shouldPostProgress, type PostedProgress, type ProgressLine } from "@rosm/core/runProgress";
+import { metersToFeet } from "@water-run/core/geo";
+import {
+  shouldPostProgress,
+  type PostedProgress,
+  type ProgressLine,
+} from "@water-run/core/runProgress";
 
 // The run's progress line (see showRunProgress). The identifier is the one
 // earlier builds posted it under, so ending a run also clears one they left.

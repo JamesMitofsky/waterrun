@@ -5,7 +5,7 @@
 // call also names the app, as the OSM and Overpass usage policies ask: Node's
 // default "node" agent is the first thing their operators throttle, and Vercel's
 // egress IPs are shared with everyone else's.
-import { USER_AGENT } from "@rosm/core/identity";
+import { USER_AGENT } from "@water-run/core/identity";
 
 // The upstream did not finish answering within its time limit. Distinct from a
 // caller abort (the client went away) and from a network failure (TypeError),

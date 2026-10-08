@@ -1,1 +1,1 @@
-export * from "@rosm/core/audience";
+export * from "@water-run/core/audience";

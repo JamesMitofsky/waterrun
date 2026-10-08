@@ -15,7 +15,7 @@ import { usePlanner } from "../src/stores/planner";
 import { useOutbox, UNDO_WINDOW_MS, type OutboxItem } from "../src/stores/outbox";
 import { configureTestPorts } from "./helpers/ports";
 
-const ACTIVE_RUN_KEY = "rosm:active-run";
+const ACTIVE_RUN_KEY = "water-run:active-run";
 
 let ports: ReturnType<typeof configureTestPorts>;
 

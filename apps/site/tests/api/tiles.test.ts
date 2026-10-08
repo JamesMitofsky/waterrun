@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { USER_AGENT } from "@rosm/core/identity";
+import { USER_AGENT } from "@water-run/core/identity";
 import { GET } from "@/pages/api/tiles";
 import { OPENFREEMAP_TILEJSON } from "@/lib/basemap/tiles";
 import { fakeTimeoutSignals, hangingFetch, json } from "../helpers/upstream";

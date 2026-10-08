@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiTimeoutError as CoreApiTimeoutError, isTransportError } from "@rosm/core/apiResponse";
+import {
+  ApiTimeoutError as CoreApiTimeoutError,
+  isTransportError,
+} from "@water-run/core/apiResponse";
 import { apiFetch, ApiTimeoutError } from "@/lib/api";
 
 afterEach(() => {

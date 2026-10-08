@@ -3,8 +3,8 @@
 // fountains. The loop starts and ends at Meridian Hill Park, which is drawn
 // as the start flag rather than listed as a stop: a run's start is a place,
 // not a point to survey.
-import type { Fountain } from "@rosm/core/schemas";
-import type { StopStatus } from "@rosm/core/stores/run";
+import type { Fountain } from "@water-run/core/schemas";
+import type { StopStatus } from "@water-run/core/stores/run";
 import { ROUTE_LINE } from "@/lib/basemap/routeLine";
 
 export const DC_CENTER: [number, number] = [38.9068, -77.0331];

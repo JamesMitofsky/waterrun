@@ -1,7 +1,7 @@
 // Single entry point for talking to the Water Run backend (the Astro `/api`
 // endpoints). The site and its API share an origin, so the base is empty and the
 // httpOnly OSM cookie carries auth automatically.
-import { ApiTimeoutError } from "@rosm/core/apiResponse";
+import { ApiTimeoutError } from "@water-run/core/apiResponse";
 
 // The shared class, not a copy: the mobile app's adapter throws the same one, so
 // an `instanceof` check (or core's `isTransportError`) reads a timeout the same

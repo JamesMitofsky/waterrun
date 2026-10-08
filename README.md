@@ -30,15 +30,15 @@ A pnpm + [Turborepo](https://turbo.build) monorepo with two apps and shared logi
 
 ```
 apps/
-  site/    @rosm/site   — Astro + Svelte site + /api backend (deployed to Vercel)
-  mobile/  @rosm/mobile — Expo (React Native) app for iOS/Android
+  site/    @water-run/site   — Astro + Svelte site + /api backend (deployed to Vercel)
+  mobile/  @water-run/mobile — Expo (React Native) app for iOS/Android
 packages/
-  core/              @rosm/core — shared logic (GPS math, routing, Zod schemas,
+  core/              @water-run/core — shared logic (GPS math, routing, Zod schemas,
                      Zustand stores, route archive) behind injected platform ports
   typescript-config/ shared tsconfig base
 ```
 
-`@rosm/core` holds everything platform-agnostic and reaches for no browser / native API
+`@water-run/core` holds everything platform-agnostic and reaches for no browser / native API
 directly — each app injects its own adapters (storage, geolocation, network, …) via
 `configureCore()`. That's how the same GPS/route/OSM logic runs on both surfaces.
 
@@ -54,7 +54,7 @@ directly — each app injects its own adapters (storage, geolocation, network, �
 pnpm install            # once, at the repo root (never inside a package)
 
 pnpm dev                # start the site (http://localhost:4321)
-pnpm --filter @rosm/mobile dev-server   # start the mobile dev server
+pnpm --filter @water-run/mobile dev-server   # start the mobile dev server
 ```
 
 Workspace-wide tasks run through Turborepo, cached per package: a package's task
@@ -69,7 +69,7 @@ pnpm format      # prettier --write .
 ```
 
 Target a single package with `pnpm --filter <name> <script>`, e.g.
-`pnpm --filter @rosm/core test:watch`.
+`pnpm --filter @water-run/core test:watch`.
 
 ## Per-app setup
 
@@ -89,35 +89,6 @@ your OSM OAuth client (see `apps/site/.env.example`).
 Pull requests welcome — the project lives at
 [github.com/JamesMitofsky/rosm](https://github.com/JamesMitofsky/rosm).
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, code style, and PR conventions.
-
-## Identifiers that intentionally keep `rosm`
-
-Earlier names (ROSM, run-for-maps) survive in a few identifiers on purpose. Renaming any
-of these breaks installed apps or loses user data, so a name sweep must skip them:
-
-- **`org.rosm.app`** bundle ID / Android package (`appId` in `packages/core/appConfig.json`)
-  — the store identity. A new one is a new App Store / Play app, without the TestFlight
-  history, updates or on-device data.
-- **`rosm://`** URL scheme (`scheme` in `appConfig.json`, used by the site's
-  `/api/osm/callback`) — OSM sign-in hands the token back through `rosm://osm-callback`,
-  and an installed build only answers the scheme it shipped with.
-- **EAS slug `rosm`** (`apps/mobile/app.config.ts`) — bound to the EAS `projectId`; a
-  mismatch fails EAS builds.
-- **`@rosm/*`** package names — internal only; renaming touches every import for no
-  visible gain.
-- **On-device storage keys** `rosm:outbox:item:` / `rosm:outbox:meta:`
-  (`apps/mobile/src/ports/storage.ts`), `rosm:planner-draft` (`apps/mobile/src/ports/api.ts`)
-  and `run-for-maps:archive` (`packages/core/src/routeArchive.ts`) — renaming them silently
-  drops edits still queued for OSM, the saved plan draft, and the user's run history.
-- **`rosm-run-location`** background task (`apps/mobile/src/tasks/runLocationTask.ts`) —
-  expo-location builds the Android notification channel ID from it, so renaming orphans
-  the channel and resets the user's settings for it.
-- **`rosm.app`** domain (`apiBase` in `appConfig.json`, `EXPO_PUBLIC_API_BASE` in
-  `apps/mobile/eas.json`) — the API base already-installed builds call; it must keep
-  serving `/api` for as long as those builds are in use.
-- **`run-for-maps-preview.vercel.app`** (`PREVIEW_ALIAS` in
-  `.github/workflows/deploy-preview.yml`) — registered as an OSM OAuth redirect URI; move
-  it only after the new alias's `/api/osm/callback` is registered.
 
 ## Deploy
 

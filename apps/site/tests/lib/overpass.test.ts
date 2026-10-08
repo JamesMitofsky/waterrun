@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { USER_AGENT } from "@rosm/core/identity";
+import { USER_AGENT } from "@water-run/core/identity";
 import { fakeTimeoutSignals, hangingFetch } from "../helpers/upstream";
 
 // The module captures OVERPASS_URL and the mirror list at import time, so load it

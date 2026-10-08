@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
-import { USER_AGENT } from "@rosm/core/identity";
+import { USER_AGENT } from "@water-run/core/identity";
 import {
   API_BASE,
   OAUTH_BASE,

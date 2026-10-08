@@ -6,8 +6,8 @@ import { SnowflakeIcon } from "phosphor-react-native/src/icons/Snowflake";
 import { TrashIcon } from "phosphor-react-native/src/icons/Trash";
 import { WarningIcon } from "phosphor-react-native/src/icons/Warning";
 import { DogIcon } from "./icons/DogIcon";
-import type { EditAction, EditExtras, Fountain } from "@rosm/core/schemas";
-import { useOutbox, type OutboxItem, type SyncState } from "@rosm/core/stores/outbox";
+import type { EditAction, EditExtras, Fountain } from "@water-run/core/schemas";
+import { useOutbox, type OutboxItem, type SyncState } from "@water-run/core/stores/outbox";
 import { PointDetailsForm } from "./PointDetailsForm";
 
 export type SurveyAction = EditAction | "broken";

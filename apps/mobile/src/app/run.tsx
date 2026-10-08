@@ -8,12 +8,12 @@ import { SkipBackIcon } from "phosphor-react-native/src/icons/SkipBack";
 import { SkipForwardIcon } from "phosphor-react-native/src/icons/SkipForward";
 import { XCircleIcon } from "phosphor-react-native/src/icons/XCircle";
 import { DogIcon } from "../components/icons/DogIcon";
-import { fmtDist, maneuver } from "@rosm/core/geo";
-import { STATUS_COLOR } from "@rosm/core/editStatus";
-import { framePadding } from "@rosm/core/mapFrame";
-import type { StopStatus } from "@rosm/core/stores/run";
-import { useOutbox, type OutboxItem } from "@rosm/core/stores/outbox";
-import { LOCATION_BUTTON_BOTTOM, RosmMap } from "../map/RosmMap";
+import { fmtDist, maneuver } from "@water-run/core/geo";
+import { STATUS_COLOR } from "@water-run/core/editStatus";
+import { framePadding } from "@water-run/core/mapFrame";
+import type { StopStatus } from "@water-run/core/stores/run";
+import { useOutbox, type OutboxItem } from "@water-run/core/stores/outbox";
+import { LOCATION_BUTTON_BOTTOM, WaterRunMap } from "../map/WaterRunMap";
 import { useRunSession, type RunSession } from "../run/useRunSession";
 import { endRun } from "../run/runLifecycle";
 import { PointSheet, pointEditOf } from "../components/PointSheet";
@@ -182,7 +182,7 @@ export default function RunScreen() {
 
   return (
     <View className="bg-base flex-1" onLayout={onScreenLayout}>
-      <RosmMap
+      <WaterRunMap
         center={s.center}
         markers={mapMarkers}
         line={s.line}

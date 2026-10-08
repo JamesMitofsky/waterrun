@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from "react";
-import type { EditExtras } from "@rosm/core/schemas";
-import { useOutbox } from "@rosm/core/stores/outbox";
+import type { EditExtras } from "@water-run/core/schemas";
+import { useOutbox } from "@water-run/core/stores/outbox";
 import { celebratePoint } from "../ports/confetti";
 import { hapticSuccess } from "../ports/haptics";
 import { pointEditOf, type PointEdit, type SurveyAction } from "../components/PointSheet";

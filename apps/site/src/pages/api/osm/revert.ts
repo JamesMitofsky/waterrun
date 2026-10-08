@@ -1,7 +1,7 @@
 import type { APIRoute } from "astro";
 import { z } from "zod";
 import { getOsmToken } from "@/lib/osmToken";
-import { RevertRequest } from "@rosm/core/schemas";
+import { RevertRequest } from "@water-run/core/schemas";
 import {
   openChangeset,
   getNode,

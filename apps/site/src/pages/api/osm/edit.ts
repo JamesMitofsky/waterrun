@@ -1,7 +1,7 @@
 import type { APIRoute } from "astro";
 import { z } from "zod";
 import { getOsmToken } from "@/lib/osmToken";
-import { EditRequest } from "@rosm/core/schemas";
+import { EditRequest } from "@water-run/core/schemas";
 import {
   openChangeset,
   getNode,
@@ -17,7 +17,7 @@ import {
   osmFailure,
 } from "@/lib/osm";
 import { readJsonBody } from "@/lib/requestBody";
-import { editSummary } from "@rosm/core/editSummary";
+import { editSummary } from "@water-run/core/editSummary";
 
 export const prerender = false;
 

@@ -3,7 +3,7 @@ import { Text, View } from "react-native";
 import { SafeArea } from "../components/ui/SafeArea";
 import { signInOsm } from "../auth/osmAuth";
 import { Button } from "../components/ui/Button";
-import cfg from "@rosm/core/appConfig.json";
+import cfg from "@water-run/core/appConfig.json";
 
 // The app's entry contract: connect an OSM account. On success the token lands in
 // the keychain and the router's auth gate flips to the hub automatically.

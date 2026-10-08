@@ -9,7 +9,7 @@ import {
   toggled,
   waterOf,
 } from "../src/fountainFilters";
-import type { Fountain } from "@rosm/core/schemas";
+import type { Fountain } from "@water-run/core/schemas";
 
 const f = (id: number, lat: number, lon: number, tags: Record<string, string> = {}): Fountain => ({
   id,

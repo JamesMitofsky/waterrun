@@ -2,10 +2,10 @@ import { useMemo } from "react";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { ScrollView, Text, View } from "react-native";
 import { SafeArea } from "../components/ui/SafeArea";
-import { getArchivedRoute } from "@rosm/core/routeArchive";
-import { STATUS_COLOR } from "@rosm/core/editStatus";
-import { RosmMap, type RosmMarker } from "../map/RosmMap";
-import { fmtDist } from "@rosm/core/geo";
+import { getArchivedRoute } from "@water-run/core/routeArchive";
+import { STATUS_COLOR } from "@water-run/core/editStatus";
+import { WaterRunMap, type MapMarker } from "../map/WaterRunMap";
+import { fmtDist } from "@water-run/core/geo";
 import { Button } from "../components/ui/Button";
 
 // Read-only replay of one archived run — validates the archive schema end-to-end.
@@ -30,14 +30,14 @@ export default function RunDetail() {
   const { plan } = route;
   const added = plan.added ?? [];
   const surveyed = plan.stops.filter((s) => s.status !== "pending" && s.status !== "skipped");
-  const stopMarkers: RosmMarker[] = plan.stops.map((s, i) => ({
+  const stopMarkers: MapMarker[] = plan.stops.map((s, i) => ({
     id: s.id,
     lat: s.lat,
     lon: s.lon,
     color: STATUS_COLOR[s.status],
     label: String(i + 1),
   }));
-  const addedMarkers: RosmMarker[] = added.map((f) => ({
+  const addedMarkers: MapMarker[] = added.map((f) => ({
     id: f.id,
     lat: f.lat,
     lon: f.lon,
@@ -51,7 +51,7 @@ export default function RunDetail() {
   return (
     <SafeArea className="bg-surface flex-1" edges={["bottom"]}>
       <View className="h-1/2">
-        <RosmMap
+        <WaterRunMap
           center={[plan.start.lat, plan.start.lon]}
           markers={markers}
           line={line}

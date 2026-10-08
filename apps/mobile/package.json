@@ -1,5 +1,5 @@
 {
-  "name": "@rosm/mobile",
+  "name": "@water-run/mobile",
   "main": "expo-router/entry",
   "version": "1.0.0",
   "private": true,
@@ -10,7 +10,7 @@
     "ios:device:dev-server": "expo run:ios --device",
     "ios:device:release-build": "expo run:ios --device --configuration Release --no-bundler",
     "ios:preview-build:local": "eas build --profile preview --platform ios --local",
-    "ios:prod-build:testflight": "eas build --profile production --platform ios --local --output ./build/rosm.ipa",
+    "ios:prod-build:testflight": "eas build --profile production --platform ios --local --output ./build/water-run.ipa",
     "ios:testflight:submit": "./scripts/submit-testflight.sh",
     "uniwind:types": "uniwind generate-artifacts --css ./src/global.css --dts ./src/uniwind-types.d.ts",
     "typecheck": "pnpm uniwind:types && tsc --noEmit",
@@ -19,7 +19,7 @@
   "dependencies": {
     "@expo/ui": "~57.0.7",
     "@maplibre/maplibre-react-native": "^11.3.6",
-    "@rosm/core": "workspace:*",
+    "@water-run/core": "workspace:*",
     "expo": "~57.0.8",
     "expo-constants": "~57.0.7",
     "expo-dev-client": "~57.0.8",

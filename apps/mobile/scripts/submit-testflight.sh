@@ -7,7 +7,7 @@
 #
 # Prerequisites (one-time):
 #   1. Build an App Store distribution .ipa (NOT a dev-client build):
-#        pnpm --filter @rosm/mobile ios:prod-build:testflight
+#        pnpm --filter @water-run/mobile ios:prod-build:testflight
 #      A dev-client / ad-hoc .ipa uploads but is useless to testers.
 #   2. Create an App Store Connect API key:
 #        App Store Connect -> Users and Access -> Integrations -> App Store Connect API

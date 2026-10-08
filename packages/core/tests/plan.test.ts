@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { planRoute } from "../src/plan";
-import { haversine, pathLength } from "@rosm/core/geo";
-import type { Fountain } from "@rosm/core/schemas";
+import { haversine, pathLength } from "@water-run/core/geo";
+import type { Fountain } from "@water-run/core/schemas";
 
 // All fixtures sit near (0, 0) where 0.001° ≈ 111 m in both axes, so straight-line
 // distances are easy to reason about. Mirrors of the module's internal constants:

@@ -1,7 +1,7 @@
 import type { APIRoute } from "astro";
-import { RouteRequest } from "@rosm/core/schemas";
-import { footRoute, RouteError } from "@rosm/core/brouter";
-import { haversine, type Pt } from "@rosm/core/geo";
+import { RouteRequest } from "@water-run/core/schemas";
+import { footRoute, RouteError } from "@water-run/core/brouter";
+import { haversine, type Pt } from "@water-run/core/geo";
 
 export const prerender = false;
 

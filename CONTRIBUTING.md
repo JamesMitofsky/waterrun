@@ -54,12 +54,12 @@ Tests run on [Vitest](https://vitest.dev), in two packages:
 
 ```bash
 pnpm test                                # both suites, through Turborepo
-pnpm --filter @rosm/core test:watch      # watch mode for core
-pnpm --filter @rosm/core test:coverage   # v8 coverage for core (text + html)
-pnpm --filter @rosm/site test            # the site suite on its own
+pnpm --filter @water-run/core test:watch      # watch mode for core
+pnpm --filter @water-run/core test:coverage   # v8 coverage for core (text + html)
+pnpm --filter @water-run/site test            # the site suite on its own
 ```
 
-The mobile app has no test runner: put logic worth testing in `@rosm/core` (or another pure
+The mobile app has no test runner: put logic worth testing in `@water-run/core` (or another pure
 module) and test it there.
 
 Conventions:

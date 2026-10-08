@@ -2,7 +2,7 @@
   import CheckCircleIcon from "phosphor-svelte/lib/CheckCircleIcon";
   import CloudArrowUpIcon from "phosphor-svelte/lib/CloudArrowUpIcon";
   import WarningCircleIcon from "phosphor-svelte/lib/WarningCircleIcon";
-  import type { SyncState } from "@rosm/core/stores/outbox";
+  import type { SyncState } from "@water-run/core/stores/outbox";
 
   // Inline per-point sync badge for popups/banners.
   let { state }: { state: SyncState } = $props();

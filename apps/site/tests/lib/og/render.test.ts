@@ -4,7 +4,7 @@ import { OG_SIZE } from "@/lib/og/card";
 import { renderOgImage } from "@/lib/og/render";
 
 // `render.ts` reads the logo and basemap from `process.cwd()`, which is the
-// package root under `pnpm --filter @rosm/site test`, as it is under the build.
+// package root under `pnpm --filter @water-run/site test`, as it is under the build.
 describe("renderOgImage", () => {
   it("renders an opaque JPEG at the card size, small enough for share previews", async () => {
     const card = await renderOgImage();

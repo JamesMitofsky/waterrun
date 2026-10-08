@@ -1,7 +1,7 @@
 @import "tailwindcss";
 @import "uniwind";
 
-/* Shared ROSM palette — same tokens as the web app's globals.css @theme block,
+/* Shared Water Run palette — same tokens as the web app's globals.css @theme block,
    so class names like bg-surface / text-muted port 1:1 from the web UI. Tailwind 4
    is CSS-first (no tailwind.config.js); the raw values live in appConfig.json,
    which still feeds runtime JS (e.g. the router's contentStyle background). */

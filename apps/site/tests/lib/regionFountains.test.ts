@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Fountain } from "@rosm/core/schemas";
+import type { Fountain } from "@water-run/core/schemas";
 import { fetchRegionFountains, fountainLoadErrorMessage } from "@/lib/regionFountains";
 
 const FOUNTAIN: Fountain = {

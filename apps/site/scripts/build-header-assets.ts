@@ -1,7 +1,7 @@
 /**
  * Derives what the site header inlines, once, at build-author time:
  *
- *   pnpm --filter @rosm/site header:assets
+ *   pnpm --filter @water-run/site header:assets
  *
  * - `src/assets/logo-144.png`: the brand mark at 3x its 48px render, from
  *   `public/icons/logo.png` (the full-size master the OG card also uses).

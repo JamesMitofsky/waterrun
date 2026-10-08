@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
 import { AppState } from "react-native";
 import { useShallow } from "zustand/react/shallow";
-import { usePlanner, type Draft } from "@rosm/core/stores/planner";
-import { draftSaveAction } from "@rosm/core/draftSave";
+import { usePlanner, type Draft } from "@water-run/core/stores/planner";
+import { draftSaveAction } from "@water-run/core/draftSave";
 import { api } from "../../ports/api";
 
 // How long the route has to sit still before it is saved. One tap changes it

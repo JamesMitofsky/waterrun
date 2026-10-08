@@ -1,6 +1,6 @@
-import type { ApiPort } from "@rosm/core/ports";
-import { ApiTimeoutError } from "@rosm/core/apiResponse";
-import cfg from "@rosm/core/appConfig.json";
+import type { ApiPort } from "@water-run/core/ports";
+import { ApiTimeoutError } from "@water-run/core/apiResponse";
+import cfg from "@water-run/core/appConfig.json";
 import { getToken } from "../auth/authStore";
 import { kv } from "./storage";
 
@@ -28,7 +28,7 @@ export function apiUrl(path: string): string {
 // The planner draft, though, backs onto the device kv store so a force-quit
 // mid-planning can offer "resume" on relaunch — same contract as web /api/draft.
 const DRAFT_ROUTE = /^\/api\/draft\b/;
-const DRAFT_KEY = "rosm:planner-draft";
+const DRAFT_KEY = "water-run:planner-draft";
 
 const jsonResponse = (body: string) =>
   new Response(body, { status: 200, headers: { "Content-Type": "application/json" } });

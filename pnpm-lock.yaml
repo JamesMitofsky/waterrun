@@ -44,7 +44,7 @@ importers:
       '@maplibre/maplibre-react-native':
         specifier: ^11.3.6
         version: 11.3.6(@types/geojson@7946.0.16)(@types/react@19.2.17)(expo@57.0.8)(react-native@0.86.0(@babel/core@7.29.7)(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.17)(react@19.2.3))(react@19.2.3)
-      '@rosm/core':
+      '@water-run/core':
         specifier: workspace:*
         version: link:../../packages/core
       expo:
@@ -186,12 +186,12 @@ importers:
       '@astrojs/vercel':
         specifier: ^11.0.10
         version: 11.0.10(astro@7.3.2(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.3)(@types/node@20.19.43)(@vercel/functions@3.7.5(ws@8.21.0))(jiti@2.7.0)(terser@5.48.0)(tsx@4.23.1)(yaml@2.9.0))(react@19.2.4)(svelte@5.56.7(@typescript-eslint/types@8.61.0))(ws@8.21.0)
-      '@rosm/core':
-        specifier: workspace:*
-        version: link:../../packages/core
       '@tailwindcss/vite':
         specifier: ^4.3.3
         version: 4.3.3(vite@8.1.5(@types/node@20.19.43)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.48.0)(tsx@4.23.1)(yaml@2.9.0))
+      '@water-run/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       astro:
         specifier: ^7.3.2
         version: 7.3.2(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.3)(@types/node@20.19.43)(@vercel/functions@3.7.5(ws@8.21.0))(jiti@2.7.0)(terser@5.48.0)(tsx@4.23.1)(yaml@2.9.0)
@@ -277,12 +277,12 @@ importers:
       '@eslint/js':
         specifier: ^9
         version: 9.39.4
-      '@rosm/typescript-config':
-        specifier: workspace:*
-        version: link:../typescript-config
       '@vitest/coverage-v8':
         specifier: ^4.1.9
         version: 4.1.9(vitest@4.1.9)
+      '@water-run/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
       eslint:
         specifier: ^9
         version: 9.39.4(jiti@2.7.0)

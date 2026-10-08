@@ -2,19 +2,25 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { useIsFocused } from "expo-router";
 import { SafeArea } from "../../components/ui/SafeArea";
-import type { Fountain, EditExtras } from "@rosm/core/schemas";
-import type { StopStatus } from "@rosm/core/stores/run";
-import { milesToMeters, haversine, boundsCenter, boundsRadiusM, type Pt } from "@rosm/core/geo";
-import { useOutbox } from "@rosm/core/stores/outbox";
-import { EDIT_COLOR, EDIT_LABEL } from "@rosm/core/editStatus";
-import { fountainDotStyle } from "@rosm/core/fountainFilters";
-import { shouldRefineSearch } from "@rosm/core/locate";
+import type { Fountain, EditExtras } from "@water-run/core/schemas";
+import type { StopStatus } from "@water-run/core/stores/run";
+import {
+  milesToMeters,
+  haversine,
+  boundsCenter,
+  boundsRadiusM,
+  type Pt,
+} from "@water-run/core/geo";
+import { useOutbox } from "@water-run/core/stores/outbox";
+import { EDIT_COLOR, EDIT_LABEL } from "@water-run/core/editStatus";
+import { fountainDotStyle } from "@water-run/core/fountainFilters";
+import { shouldRefineSearch } from "@water-run/core/locate";
 import { api } from "../../ports/api";
 import { locateFast } from "../../ports/locateFast";
 import { celebratePoint } from "../../ports/confetti";
 import { hapticSuccess } from "../../ports/haptics";
 import { PointSheetHost } from "../../components/ui/PointSheetHost";
-import { RosmMap, type RosmMarker, type RosmRegion } from "../../map/RosmMap";
+import { WaterRunMap, type MapMarker, type MapRegion } from "../../map/WaterRunMap";
 import { PointSheet, type PointEdit, type SurveyAction } from "../../components/PointSheet";
 
 const TAG = { key: "amenity", value: "drinking_water" };
@@ -30,7 +36,7 @@ type Search = { center: Pt; radiusM: number };
 
 // True once the viewport has panned/zoomed far enough from the last search that
 // re-querying would surface different fountains.
-function movedEnough(region: RosmRegion, last: Search): boolean {
+function movedEnough(region: MapRegion, last: Search): boolean {
   const c = boundsCenter(region.bounds);
   const r = Math.min(boundsRadiusM(region.bounds), MAX_RADIUS_M);
   const panned = haversine(c, last.center) > last.radiusM * REQUERY_FRACTION;
@@ -49,7 +55,7 @@ export default function QuickUpdate() {
   // Track the tapped point by id, not the resolved object — the sheet opens the
   // instant this is set (before the fountain is looked up), so it never waits on
   // content. `selected` is derived; a null derive shows the sheet's spinner.
-  const [selectedId, setSelectedId] = useState<RosmMarker["id"] | null>(null);
+  const [selectedId, setSelectedId] = useState<MapMarker["id"] | null>(null);
   // Points updated this session, keyed by node id, derived from the outbox so
   // the sheet can show the recorded state + live sync status.
   const outboxItems = useOutbox((s) => s.items);
@@ -69,7 +75,7 @@ export default function QuickUpdate() {
   const [err, setErr] = useState<string | null>(null);
   // Where/how wide the current markers were fetched, and the live viewport.
   const [lastSearch, setLastSearch] = useState<Search | null>(null);
-  const [region, setRegion] = useState<RosmRegion | null>(null);
+  const [region, setRegion] = useState<MapRegion | null>(null);
   // Bumped to move the map to `center` when a fresh fix corrects the first one.
   const [recenterKey, setRecenterKey] = useState(0);
   // The map only draws the device's location while this tab is on screen.
@@ -176,7 +182,7 @@ export default function QuickUpdate() {
   // Memoized so an unrelated re-render doesn't rebuild the whole array and
   // re-diff the GeoJSON source to the native map. Only recomputes when the
   // inputs that actually affect a dot change.
-  const markers: RosmMarker[] = useMemo(
+  const markers: MapMarker[] = useMemo(
     () =>
       fountains.map((f) => {
         const edit = edits[f.id];
@@ -212,7 +218,7 @@ export default function QuickUpdate() {
   return (
     <View className="bg-surface flex-1">
       {center ? (
-        <RosmMap
+        <WaterRunMap
           center={[center.lat, center.lon]}
           markers={markers}
           showUserLocation={isFocused}

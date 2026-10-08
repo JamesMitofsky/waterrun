@@ -1,8 +1,8 @@
-# @rosm/mobile
+# @water-run/mobile
 
 The Expo (React Native, SDK 57) app — the native surface for iOS/Android. It owns
 auth, GPS/background tracking, and the map; all route/GPS/OSM logic comes from
-[`@rosm/core`](../../packages/core). File-based routing via `expo-router` (`src/app/`),
+[`@water-run/core`](../../packages/core). File-based routing via `expo-router` (`src/app/`),
 styling via Uniwind (Tailwind 4), maps via MapLibre.
 
 It is **not** runnable in Expo Go — MapLibre, background location, and SecureStore are
@@ -14,12 +14,12 @@ From the repo root, after `pnpm install`:
 
 ```bash
 # Build + install the dev client on a booted iOS simulator, then start Metro:
-pnpm --filter @rosm/mobile ios:simulator:dev-server
+pnpm --filter @water-run/mobile ios:simulator:dev-server
 # Android:
-pnpm --filter @rosm/mobile android:simulator:dev-server
+pnpm --filter @water-run/mobile android:simulator:dev-server
 
 # Metro only (once a dev build is installed):
-pnpm --filter @rosm/mobile dev-server
+pnpm --filter @water-run/mobile dev-server
 ```
 
 `ios:simulator:dev-server` / `android:simulator:dev-server` run `expo run:*`, which prebuilds the native project and compiles the
@@ -31,7 +31,7 @@ dev client. For a physical device, use an [EAS](https://docs.expo.dev/build/intr
 Point a dev build at a locally running site by copying the example env file. `pnpm dev`
 at the repo root serves the site on http://localhost:4321, reachable from the iOS
 simulator; for an Android emulator or a physical device the site has to listen beyond
-loopback, so start it with `pnpm --filter @rosm/site dev --host` instead.
+loopback, so start it with `pnpm --filter @water-run/site dev --host` instead.
 
 ```bash
 cp apps/mobile/.env.example apps/mobile/.env.local
@@ -54,13 +54,12 @@ Expo inlines `EXPO_PUBLIC_*` at build time and loads `.env.local` for Release bu
 no EAS profile in [`eas.json`](./eas.json) overrides it. `EXPO_PUBLIC_API_BASE` replaces it
 at build time, so do not put it in `.env.local`; set it in a build profile only to point a
 non-dev build at a different backend, such as a preview deploy. The OSM token is kept per
-backend host, and a build that talks to waterrun.app takes over the token earlier builds
-kept for rosm.app, so the move signs nobody out.
+backend host, so a dev build pointed at another backend keeps its own sign-in.
 
 OSM sign-in reuses the site backend's `/api/osm/auth?native=1` flow and returns the token
-via the `rosm://osm-callback` deep link — so the backend must be reachable from the device,
+via the `waterrun://osm-callback` deep link — so the backend must be reachable from the device,
 and its OSM OAuth app must allow the `http://localhost:4321/api/osm/callback` redirect (or
-the LAN-IP equivalent for a physical device; see `apps/site/.env.example`). The `rosm://`
+the LAN-IP equivalent for a physical device; see `apps/site/.env.example`). The `waterrun://`
 hop is internal.
 
 ## Config

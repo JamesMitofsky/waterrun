@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { AppState } from "react-native";
 import * as Network from "expo-network";
-import { callApi } from "@rosm/core/apiCall";
+import { callApi } from "@water-run/core/apiCall";
 import { onAuthChange } from "./authStore";
 
 export type OsmStatus = { loggedIn: boolean; apiBase: string; live: boolean };

@@ -1,10 +1,10 @@
 // Fetch OSM points from the Overpass API.
-import type { Fountain } from "@rosm/core/schemas";
-import type { TagFilter, RecencyMode } from "@rosm/core/schemas";
-import { matchesRecency } from "@rosm/core/checkDate";
+import type { Fountain } from "@water-run/core/schemas";
+import type { TagFilter, RecencyMode } from "@water-run/core/schemas";
+import { matchesRecency } from "@water-run/core/checkDate";
 import { UpstreamNetworkError, UpstreamTimeoutError, upstreamFetch } from "./upstream";
 
-export { parseCheckDate, matchesRecency } from "@rosm/core/checkDate";
+export { parseCheckDate, matchesRecency } from "@water-run/core/checkDate";
 
 // Cutoff epoch ms for "N months ago" from now.
 function monthsAgo(months: number): number {

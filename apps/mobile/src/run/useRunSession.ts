@@ -1,20 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRun, type RunStop } from "@rosm/core/stores/run";
-import { useOutbox } from "@rosm/core/stores/outbox";
+import { useRun, type RunStop } from "@water-run/core/stores/run";
+import { useOutbox } from "@water-run/core/stores/outbox";
 import {
   runGuidance,
   guidanceWindow,
   ARRIVAL_RADIUS_M,
   PROXIMITY_RADIUS_M,
-} from "@rosm/core/guidance";
-import { compass, type Pt } from "@rosm/core/geo";
-import { ptLabel } from "@rosm/core/pointTypes";
-import { STATUS_COLOR } from "@rosm/core/editStatus";
-import { todayLocal } from "@rosm/core/editSummary";
-import { callApi, postJson, UNEXPECTED_REPLY } from "@rosm/core/apiCall";
-import { activeRunToResume, archiveRun, beginRun } from "@rosm/core/runLifecycle";
-import { progressLine } from "@rosm/core/runProgress";
-import type { EditAction, EditExtras, Fountain } from "@rosm/core/schemas";
+} from "@water-run/core/guidance";
+import { compass, type Pt } from "@water-run/core/geo";
+import { ptLabel } from "@water-run/core/pointTypes";
+import { STATUS_COLOR } from "@water-run/core/editStatus";
+import { todayLocal } from "@water-run/core/editSummary";
+import { callApi, postJson, UNEXPECTED_REPLY } from "@water-run/core/apiCall";
+import { activeRunToResume, archiveRun, beginRun } from "@water-run/core/runLifecycle";
+import { progressLine } from "@water-run/core/runProgress";
+import type { EditAction, EditExtras, Fountain } from "@water-run/core/schemas";
 import type { SurveyAction } from "../components/PointSheet";
 import { getToken } from "../auth/authStore";
 import { useOsmStatus } from "../auth/useOsmStatus";
@@ -29,7 +29,7 @@ import {
   showRunProgress,
   endRunProgress,
 } from "../ports/notify";
-import type { RosmMarker } from "../map/RosmMap";
+import type { MapMarker } from "../map/WaterRunMap";
 
 // Human-facing confirmation shown after a save. No raw OSM tags reach the UI.
 const SAVED_LABEL: Record<SurveyAction, string> = {
@@ -52,7 +52,7 @@ type CreatedNode = {
 };
 
 // The Expo run session: live GPS, the shared guidance derived from it, the OSM
-// recording actions, and marker DATA for RosmMap. Mirrors the web useRunSession
+// recording actions, and marker DATA for WaterRunMap. Mirrors the web useRunSession
 // but returns markers as plain data (the screen owns the bottom sheet). Ending
 // the run is run/runLifecycle's endRun, not part of the session.
 export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
@@ -288,23 +288,23 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
     [routeCoords],
   );
 
-  const markers: RosmMarker[] = useMemo(() => {
+  const markers: MapMarker[] = useMemo(() => {
     const onRoute = new Set(stops.map((s) => s.id));
-    const stopMarkers: RosmMarker[] = stops.map((s, i) => ({
+    const stopMarkers: MapMarker[] = stops.map((s, i) => ({
       id: s.id,
       lat: s.lat,
       lon: s.lon,
       color: i === index && s.status === "pending" ? "#2563eb" : STATUS_COLOR[s.status],
       label: String(i + 1),
     }));
-    const addedMarkers: RosmMarker[] = added.map((f) => ({
+    const addedMarkers: MapMarker[] = added.map((f) => ({
       id: f.id,
       lat: f.lat,
       lon: f.lon,
       color: "#16a34a",
       label: "+",
     }));
-    const dimMarkers: RosmMarker[] = pool
+    const dimMarkers: MapMarker[] = pool
       .filter((f) => !onRoute.has(f.id))
       .map((f) => ({ id: f.id, lat: f.lat, lon: f.lon, color: "#9ca3af", dimmed: true }));
     return [...dimMarkers, ...stopMarkers, ...addedMarkers];

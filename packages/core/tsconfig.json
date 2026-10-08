@@ -1,5 +1,5 @@
 {
-  "extends": "@rosm/typescript-config/base.json",
+  "extends": "@water-run/typescript-config/base.json",
   "compilerOptions": {
     "lib": ["ES2022", "DOM"]
   },

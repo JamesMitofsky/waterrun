@@ -7,7 +7,7 @@
       "env": ["VERCEL_*"],
       "outputs": ["dist/**", ".vercel/output/**", ".astro/**"]
     },
-    // The apps compile @rosm/core's TypeScript source, so their lint, typecheck
+    // The apps compile @water-run/core's TypeScript source, so their lint, typecheck
     // and test results depend on core's files. `transit` has no script: it only
     // folds every workspace dependency's hash into these tasks' cache keys, so a
     // core edit re-runs its dependents without serializing them behind core's

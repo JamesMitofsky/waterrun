@@ -1,5 +1,5 @@
 import * as SecureStore from "expo-secure-store";
-import { tokenKeyFor } from "@rosm/core/nativeAuth";
+import { tokenKeyFor } from "@water-run/core/nativeAuth";
 import { API_BASE } from "../ports/api";
 
 // The OSM bearer token, cached in memory (read synchronously by the api port) and

@@ -1,7 +1,7 @@
 /**
  * Renders the social card to a file, so it can be looked at without a build:
  *
- *   pnpm --filter @rosm/site og:preview
+ *   pnpm --filter @water-run/site og:preview
  *
  * The card is a build-time artefact — `pages/opengraph-image.jpg.ts` is
  * prerendered — so the two other ways to see it both come with a wait or a

@@ -1,4 +1,4 @@
-import type { GeoPoint } from "@rosm/core/ports";
+import type { GeoPoint } from "@water-run/core/ports";
 
 // A tiny module-scope emitter that bridges the background TaskManager location task
 // (which runs outside React) to the run hook's subscribers. The task pushes points

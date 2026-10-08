@@ -1,7 +1,7 @@
 import type { APIRoute } from "astro";
 import { z } from "zod";
-import { FountainsRequest, type TagFilter } from "@rosm/core/schemas";
-import { POINT_TYPES } from "@rosm/core/pointTypes";
+import { FountainsRequest, type TagFilter } from "@water-run/core/schemas";
+import { POINT_TYPES } from "@water-run/core/pointTypes";
 import { fetchFountains, OverpassError } from "@/lib/overpass";
 import { regionBounds } from "@/lib/fountainRegions";
 import { readJsonBody } from "@/lib/requestBody";

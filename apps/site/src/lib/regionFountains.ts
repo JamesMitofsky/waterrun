@@ -1,5 +1,5 @@
-import type { Fountain } from "@rosm/core/schemas";
-import { apiErrorMessage, readApiJson, type ApiReply } from "@rosm/core/apiResponse";
+import type { Fountain } from "@water-run/core/schemas";
+import { apiErrorMessage, readApiJson, type ApiReply } from "@water-run/core/apiResponse";
 import { apiFetch, ApiTimeoutError } from "@/lib/api";
 
 /**

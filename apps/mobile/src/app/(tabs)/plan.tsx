@@ -2,11 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Platform, Text, View } from "react-native";
 import { useIsFocused, useRouter } from "expo-router";
 import { PointSheetHost } from "../../components/ui/PointSheetHost";
-import { usePlanner, inRouteIdsOf, shouldAutoFindPoints } from "@rosm/core/stores/planner";
-import { fmtDist } from "@rosm/core/geo";
-import type { Fountain } from "@rosm/core/schemas";
+import { usePlanner, inRouteIdsOf, shouldAutoFindPoints } from "@water-run/core/stores/planner";
+import { fmtDist } from "@water-run/core/geo";
+import type { Fountain } from "@water-run/core/schemas";
 import { Button } from "../../components/ui/Button";
-import { RosmMap, type RosmMarker } from "../../map/RosmMap";
+import { WaterRunMap, type MapMarker } from "../../map/WaterRunMap";
 import { recentFix } from "../../ports/locateFast";
 import { RouteBuilderPanel } from "../../components/planner/RouteBuilderPanel";
 import { PhaseNav } from "../../components/planner/PhaseNav";
@@ -138,7 +138,7 @@ function PlanContent() {
   // Numeric ids are fountains (toggling in route during build phase); "via-N" removes that waypoint;
   // the start flag and island highlight ignore taps.
   const onMarkerPress = useCallback(
-    (id: RosmMarker["id"]) => {
+    (id: MapMarker["id"]) => {
       if (typeof id === "number") {
         if (phase === "map") {
           hapticSelect();
@@ -174,7 +174,7 @@ function PlanContent() {
 
   return (
     <View className="bg-surface flex-1">
-      <RosmMap
+      <WaterRunMap
         center={mapCenter}
         zoom={center ? 15 : 1.5}
         markers={markers}

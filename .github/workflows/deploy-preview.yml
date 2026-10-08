@@ -86,7 +86,7 @@ jobs:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       # Fixed URL every preview is aliased to. Override with repo variable PREVIEW_ALIAS.
-      PREVIEW_ALIAS: ${{ vars.PREVIEW_ALIAS || 'run-for-maps-preview.vercel.app' }}
+      PREVIEW_ALIAS: ${{ vars.PREVIEW_ALIAS || 'water-run-preview.vercel.app' }}
     steps:
       # The commit authorize resolved, not whatever the branch points at by now.
       - uses: actions/checkout@v4

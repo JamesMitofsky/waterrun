@@ -2,7 +2,7 @@ import {
   closeChangesetWhenSettled,
   endRun as endRunState,
   forgetStaleActiveRun,
-} from "@rosm/core/runLifecycle";
+} from "@water-run/core/runLifecycle";
 import { reconcileRunTracking } from "../tasks/runLocationTask";
 import { endRunProgress } from "../ports/notify";
 

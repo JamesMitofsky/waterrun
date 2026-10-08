@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { AppState } from "react-native";
 import * as Network from "expo-network";
-import { useOutbox } from "@rosm/core/stores/outbox";
+import { useOutbox } from "@water-run/core/stores/outbox";
 import { getToken, onAuthChange } from "../auth/authStore";
 
 // App-wide outbox driver: hydrate the queue on launch, then push queued edits out

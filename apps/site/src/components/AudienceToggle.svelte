@@ -1,6 +1,6 @@
 <script lang="ts">
   import UserIcon from "phosphor-svelte/lib/UserIcon";
-  import type { Audience } from "@rosm/core/schemas";
+  import type { Audience } from "@water-run/core/schemas";
   import DogIcon from "@/components/icons/DogIcon.svelte";
   import BothAudienceIcon from "@/components/icons/BothAudienceIcon.svelte";
 

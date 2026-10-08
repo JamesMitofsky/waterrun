@@ -1,7 +1,7 @@
 import type { ComponentType } from "react";
 import { Pressable, Text, View } from "react-native";
 import { UserIcon } from "phosphor-react-native/src/icons/User";
-import type { Audience } from "@rosm/core/schemas";
+import type { Audience } from "@water-run/core/schemas";
 import { DogIcon } from "./icons/DogIcon";
 import { BothAudienceIcon } from "./icons/BothAudienceIcon";
 

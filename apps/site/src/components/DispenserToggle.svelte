@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Dispenser } from "@rosm/core/schemas";
+  import type { Dispenser } from "@water-run/core/schemas";
   import BubblerIcon from "@/components/icons/BubblerIcon.svelte";
   import BothDispenserIcon from "@/components/icons/BothDispenserIcon.svelte";
   import BottleIcon from "@/components/icons/BottleIcon.svelte";

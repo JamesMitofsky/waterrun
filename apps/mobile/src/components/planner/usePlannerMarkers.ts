@@ -1,14 +1,14 @@
 import { useMemo } from "react";
-import { usePlanner } from "@rosm/core/stores/planner";
-import { EDIT_COLOR, EDIT_LABEL } from "@rosm/core/editStatus";
-import type { RosmMarker } from "../../map/RosmMap";
+import { usePlanner } from "@water-run/core/stores/planner";
+import { EDIT_COLOR, EDIT_LABEL } from "@water-run/core/editStatus";
+import type { MapMarker } from "../../map/WaterRunMap";
 import type { PointEdit } from "../PointSheet";
 
 // The planner-phase marker set: every found fountain (colored by its route /
 // pin / exclusion / edit state), plus via waypoints, the start flag, and the
 // unreachable-island highlight. Data only — the screen owns the bottom sheet
-// (RosmMap markers can't carry popups). Mirrors the web usePlannerMarkers.
-export function usePlannerMarkers({ edits }: { edits: Record<number, PointEdit> }): RosmMarker[] {
+// (WaterRunMap markers can't carry popups). Mirrors the web usePlannerMarkers.
+export function usePlannerMarkers({ edits }: { edits: Record<number, PointEdit> }): MapMarker[] {
   const fountains = usePlanner((s) => s.fountains);
   const stops = usePlanner((s) => s.stops);
   const pinnedIds = usePlanner((s) => s.pinnedIds);
@@ -24,7 +24,7 @@ export function usePlannerMarkers({ edits }: { edits: Record<number, PointEdit> 
     const excludedSet = new Set(excludedIds);
     const autoSet = new Set(autoIds);
 
-    const fountainMarkers: RosmMarker[] = fountains.map((f) => {
+    const fountainMarkers: MapMarker[] = fountains.map((f) => {
       const n = chosenIds.get(f.id);
       const edit = edits[f.id];
       const isAuto = autoSet.has(f.id);
@@ -52,7 +52,7 @@ export function usePlannerMarkers({ edits }: { edits: Record<number, PointEdit> 
       return { id: f.id, lat: f.lat, lon: f.lon, color, label };
     });
 
-    const viaMarkers: RosmMarker[] = vias.map((v, i) => ({
+    const viaMarkers: MapMarker[] = vias.map((v, i) => ({
       id: `via-${i}`,
       lat: v.lat,
       lon: v.lon,
@@ -60,12 +60,12 @@ export function usePlannerMarkers({ edits }: { edits: Record<number, PointEdit> 
       label: "✦",
     }));
 
-    const startMarker: RosmMarker[] = center
+    const startMarker: MapMarker[] = center
       ? [{ id: "start", lat: center.lat, lon: center.lon, color: "#16a34a", label: "⚑" }]
       : [];
 
     // Highlight the unreachable ("target island") point, if any.
-    const islandMarker: RosmMarker[] = islandPt
+    const islandMarker: MapMarker[] = islandPt
       ? [{ id: "island", lat: islandPt.lat, lon: islandPt.lon, color: "#dc2626", label: "!" }]
       : [];
 

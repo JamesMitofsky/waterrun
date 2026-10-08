@@ -1,5 +1,5 @@
 {
-  "name": "@rosm/site",
+  "name": "@water-run/site",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -17,7 +17,7 @@
   "dependencies": {
     "@astrojs/svelte": "^9.0.1",
     "@astrojs/vercel": "^11.0.10",
-    "@rosm/core": "workspace:*",
+    "@water-run/core": "workspace:*",
     "@tailwindcss/vite": "^4.3.3",
     "astro": "^7.3.2",
     "canvas-confetti": "^1.9.4",

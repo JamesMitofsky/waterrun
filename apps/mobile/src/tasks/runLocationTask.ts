@@ -1,7 +1,7 @@
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
-import type { GeoPoint, GeoWatch } from "@rosm/core/ports";
-import { getActiveRunId, trackingAction } from "@rosm/core/runLifecycle";
+import type { GeoPoint, GeoWatch } from "@water-run/core/ports";
+import { getActiveRunId, trackingAction } from "@water-run/core/runLifecycle";
 import { emitPoint, listenerCount, onPoint } from "../ports/locationEmitter";
 
 // Live run tracking: the background location task, and when it may run.
@@ -17,7 +17,7 @@ import { emitPoint, listenerCount, onPoint } from "../ports/locationEmitter";
 // that. Every start and stop goes through it, one at a time, each reading the
 // facts on its own turn, so a quick unmount and remount can't stop the task
 // the new screen relies on.
-export const RUN_LOCATION_TASK = "rosm-run-location";
+export const RUN_LOCATION_TASK = "water-run-location";
 
 // Registered at module scope (imported from app/_layout) so it exists at launch,
 // including cold background deliveries. The body touches no React — it pushes

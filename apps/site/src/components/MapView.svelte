@@ -350,7 +350,7 @@
     // view before the map has loaded anything.
     onLoad?: () => void;
     // Fired once, when the map tells its loading frame to clear — the same
-    // moment as the `rosm:map-ready` event, for the caller that rendered this
+    // moment as the `water-run:map-ready` event, for the caller that rendered this
     // map and wants to start something the visitor will actually see. Fires
     // on failure too (the frame clears to the error card either way).
     onReady?: () => void;
@@ -796,7 +796,7 @@
     // One frame of slack: `load` fires *before* the browser has composited that
     // first frame, so revealing synchronously can dissolve to a blank canvas.
     requestAnimationFrame(() => {
-      root?.dispatchEvent(new CustomEvent("rosm:map-ready", { bubbles: true }));
+      root?.dispatchEvent(new CustomEvent("water-run:map-ready", { bubbles: true }));
       onReady?.();
     });
   }

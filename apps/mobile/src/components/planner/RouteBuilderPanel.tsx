@@ -1,9 +1,9 @@
 import { useMemo } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { ArrowCounterClockwiseIcon } from "phosphor-react-native/src/icons/ArrowCounterClockwise";
-import { usePlanner, removedOf } from "@rosm/core/stores/planner";
-import type { Fountain } from "@rosm/core/schemas";
-import { fmtDist } from "@rosm/core/geo";
+import { usePlanner, removedOf } from "@water-run/core/stores/planner";
+import type { Fountain } from "@water-run/core/schemas";
+import { fmtDist } from "@water-run/core/geo";
 import { Button } from "../ui/Button";
 import { PhaseNav } from "./PhaseNav";
 

@@ -1,5 +1,5 @@
 import * as Location from "expo-location";
-import type { GeoPoint, GeolocationPort } from "@rosm/core/ports";
+import type { GeoPoint, GeolocationPort } from "@water-run/core/ports";
 
 function toPoint(c: Location.LocationObjectCoords): GeoPoint {
   const h = c.heading;

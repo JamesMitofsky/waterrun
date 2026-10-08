@@ -6,14 +6,14 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import * as SplashScreen from "expo-splash-screen";
-import cfg from "@rosm/core/appConfig.json";
+import cfg from "@water-run/core/appConfig.json";
 import { configureMobilePorts } from "../ports";
 import { useAuth } from "../auth/useAuth";
 import { ConfettiHost } from "../ports/confetti";
 import { OutboxSyncBridge } from "../components/OutboxSyncBridge";
 import { settleRunAtLaunch } from "../run/runLifecycle";
 
-// Wire @rosm/core to the Expo adapters once, before any screen renders, then
+// Wire @water-run/core to the Expo adapters once, before any screen renders, then
 // clear up after a run the app died in the middle of.
 configureMobilePorts();
 settleRunAtLaunch();

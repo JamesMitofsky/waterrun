@@ -2,8 +2,8 @@
 // Read endpoints use .json; writes use XML per OSM API 0.6.
 import crypto from "crypto";
 import { z } from "zod";
-import type { EditAction, EditExtras } from "@rosm/core/schemas";
-import { isTransientStatus } from "@rosm/core/apiResponse";
+import type { EditAction, EditExtras } from "@water-run/core/schemas";
+import { isTransientStatus } from "@water-run/core/apiResponse";
 import { APP_NAME } from "./appConfig";
 import {
   UpstreamNetworkError,

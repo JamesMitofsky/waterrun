@@ -1,6 +1,6 @@
 import { useContext, type Ref } from "react";
 import { TextInput, type TextInputProps } from "react-native";
-import { stripLineBreaks } from "@rosm/core/note";
+import { stripLineBreaks } from "@water-run/core/note";
 import { FieldFocusContext } from "./fieldFocus";
 
 // Return's behavior is fixed below, so it isn't a prop (blurOnSubmit is the

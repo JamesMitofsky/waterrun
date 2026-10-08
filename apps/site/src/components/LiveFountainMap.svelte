@@ -4,10 +4,10 @@
   import FountainPopup from "@/components/fountains/FountainPopup.svelte";
   import SearchProgress, { type LoadingStep } from "@/components/fountains/SearchProgress.svelte";
   import ErrorNotice from "@/components/ErrorNotice.svelte";
-  import type { Fountain } from "@rosm/core/schemas";
-  import { isOutOfService } from "@rosm/core/fountainFilters";
+  import type { Fountain } from "@water-run/core/schemas";
+  import { isOutOfService } from "@water-run/core/fountainFilters";
   import { fetchRegionFountains, fountainLoadErrorMessage } from "@/lib/regionFountains";
-  import { haversine } from "@rosm/core/geo";
+  import { haversine } from "@water-run/core/geo";
 
   // Live counterpart to DemoRunMap: every drinking-water point in a fixed area
   // around central DC, colored by how recently it was verified. Read-only; no

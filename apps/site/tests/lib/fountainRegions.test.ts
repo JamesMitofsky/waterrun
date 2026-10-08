@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { MAX_SEARCH_RADIUS_M, boundsHalfDiagonalM } from "@rosm/core/geo";
-import { FountainsRequest } from "@rosm/core/schemas";
+import { MAX_SEARCH_RADIUS_M, boundsHalfDiagonalM } from "@water-run/core/geo";
+import { FountainsRequest } from "@water-run/core/schemas";
 import { frameBounds, regionBounds } from "@/lib/fountainRegions";
 import { MAP_FRAMES, offsetFromCenter } from "@/lib/basemap/frames";
 

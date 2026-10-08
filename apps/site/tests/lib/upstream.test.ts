@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { USER_AGENT } from "@rosm/core/identity";
+import { USER_AGENT } from "@water-run/core/identity";
 import {
   UpstreamNetworkError,
   UpstreamTimeoutError,

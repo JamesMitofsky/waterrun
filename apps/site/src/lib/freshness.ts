@@ -1,4 +1,4 @@
-import { lastCheckedMs } from "@rosm/core/checkDate";
+import { lastCheckedMs } from "@water-run/core/checkDate";
 
 // Freshness of a fountain's last on-the-ground verification. Never-checked folds
 // into "very stale" — the point that most needs a runner to visit.

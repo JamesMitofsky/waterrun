@@ -1,9 +1,9 @@
 <script lang="ts">
   import Wrench from "phosphor-svelte/lib/Wrench";
   import DogIcon from "@/components/icons/DogIcon.svelte";
-  import type { Fountain } from "@rosm/core/schemas";
-  import { isDogWater, isOutOfService } from "@rosm/core/fountainFilters";
-  import { checkedAgoLabel } from "@rosm/core/checkDate";
+  import type { Fountain } from "@water-run/core/schemas";
+  import { isDogWater, isOutOfService } from "@water-run/core/fountainFilters";
+  import { checkedAgoLabel } from "@water-run/core/checkDate";
 
   // Read-only popup: name, last-checked date, status flags. No edit controls —
   // this view is purely for finding water nearby.

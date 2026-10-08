@@ -14,7 +14,7 @@ import { useOutbox } from "./stores/outbox";
 // store so it outlives the process: location tracking runs only for an active
 // run, so tracking the OS restores after the app died mid-run can tell it has
 // nobody to track for, and a relaunch can find that run again.
-const ACTIVE_RUN_KEY = "rosm:active-run";
+const ACTIVE_RUN_KEY = "water-run:active-run";
 
 // How long an ended run waits for the outbox to settle before giving up on
 // closing its changeset: the last edit's undo hold, then a send or two.

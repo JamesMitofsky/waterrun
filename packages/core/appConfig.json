@@ -1,8 +1,8 @@
 {
-  "appId": "org.rosm.app",
+  "appId": "app.waterrun",
   "appName": "Water Run",
   "appTagline": "Verified public drinking fountains",
-  "scheme": "rosm",
+  "scheme": "waterrun",
   "apiBase": "https://waterrun.app",
   "appStoreUrl": "",
   "nativeBackground": "#0c0d0a",

@@ -1,6 +1,6 @@
 import * as Location from "expo-location";
-import type { Pt } from "@rosm/core/geo";
-import { locateFast as locateWith, type Fix } from "@rosm/core/locate";
+import type { Pt } from "@water-run/core/geo";
+import { locateFast as locateWith, type Fix } from "@water-run/core/locate";
 import { geolocation } from "./geolocation";
 
 // How old and how rough a cached fix may be and still center a map. Ten

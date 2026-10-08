@@ -1,6 +1,6 @@
 import Storage from "expo-sqlite/kv-store";
-import type { KvPort, OutboxStoragePort } from "@rosm/core/ports";
-import type { OutboxItem } from "@rosm/core/stores/outbox";
+import type { KvPort, OutboxStoragePort } from "@water-run/core/ports";
+import type { OutboxItem } from "@water-run/core/stores/outbox";
 
 // expo-sqlite/kv-store is a localStorage-/AsyncStorage-compatible key/value store
 // backed by SQLite. Its synchronous getItemSync/setItemSync back the KvPort (route
@@ -14,8 +14,8 @@ export const kv: KvPort = {
 
 // One row per queued edit (keyed by id) + one row per meta value, mirroring the
 // web IndexedDB layout so per-item puts stay atomic (no read-modify-write races).
-const ITEM_PREFIX = "rosm:outbox:item:";
-const META_PREFIX = "rosm:outbox:meta:";
+const ITEM_PREFIX = "water-run:outbox:item:";
+const META_PREFIX = "water-run:outbox:meta:";
 
 export const outboxStorage: OutboxStoragePort = {
   getAll: async () => {

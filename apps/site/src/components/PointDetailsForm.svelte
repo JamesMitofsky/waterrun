@@ -1,8 +1,8 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import SnowflakeIcon from "phosphor-svelte/lib/SnowflakeIcon";
-  import type { Audience, Dispenser, EditExtras } from "@rosm/core/schemas";
-  import { NOTE_MAX, hasQuickTag, normalizeNote, toggleQuickTag } from "@rosm/core/note";
+  import type { Audience, Dispenser, EditExtras } from "@water-run/core/schemas";
+  import { NOTE_MAX, hasQuickTag, normalizeNote, toggleQuickTag } from "@water-run/core/note";
   import { audienceFromTags } from "@/lib/audience";
   import { dispenserFromTags } from "@/lib/dispenser";
   import AudienceToggle from "@/components/AudienceToggle.svelte";
