@@ -67,7 +67,8 @@ function axisPadding(size: number, a: number, b: number): [number, number] {
 
 // Camera padding (points) that fits a framed box into the part of a
 // `width` x `height` map the user can actually see: below `coverTop` (the
-// status bar) and above `coverBottom` (a panel drawn over the map).
+// status bar, and any controls drawn across the top) and above `coverBottom`
+// (a panel drawn over the map).
 export function framePadding(o: {
   width: number;
   height: number;

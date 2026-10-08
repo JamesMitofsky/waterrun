@@ -13,7 +13,7 @@ import { STATUS_COLOR } from "@rosm/core/editStatus";
 import { framePadding } from "@rosm/core/mapFrame";
 import type { StopStatus } from "@rosm/core/stores/run";
 import { useOutbox, type OutboxItem } from "@rosm/core/stores/outbox";
-import { RosmMap } from "../map/RosmMap";
+import { LOCATION_BUTTON_BOTTOM, RosmMap } from "../map/RosmMap";
 import { useRunSession, type RunSession } from "../run/useRunSession";
 import { endRun } from "../run/runLifecycle";
 import { PointSheet, pointEditOf } from "../components/PointSheet";
@@ -75,7 +75,8 @@ export default function RunScreen() {
   const [now, setNow] = useState(() => new Date());
 
   // The map keeps the runner and their next stop in the part of it the run
-  // panel doesn't cover, so both sizes are measured as they change.
+  // panel doesn't cover, so both sizes are measured as they change. At the
+  // top, the status bar and the location button below it count as covered.
   const [mapSize, setMapSize] = useState({ width: 0, height: 0 });
   const [panelHeight, setPanelHeight] = useState(0);
   const onScreenLayout = (e: LayoutChangeEvent) => {
@@ -88,7 +89,7 @@ export default function RunScreen() {
       framePadding({
         width: mapSize.width,
         height: mapSize.height,
-        coverTop: insets.top,
+        coverTop: insets.top + LOCATION_BUTTON_BOTTOM,
         coverBottom: panelHeight,
       }),
     [mapSize, insets.top, panelHeight],

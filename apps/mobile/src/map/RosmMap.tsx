@@ -24,6 +24,14 @@ const MARKER_LAYER = "marker-dots";
 const FRAME_MS = 500;
 const RECENTER_MS = 600;
 
+// The location button sits over the map's top-left corner, this far below the
+// top safe-area inset.
+const LOCATION_BUTTON_TOP = 8;
+const LOCATION_BUTTON_SIZE = 44;
+// Where the button ends, below the top inset. A screen that frames points
+// counts the strip above it as covered, so a framed dot never lands under it.
+export const LOCATION_BUTTON_BOTTOM = LOCATION_BUTTON_TOP + LOCATION_BUTTON_SIZE;
+
 // Marker data only — screens attach their own action UI on press (Leaflet-style
 // popups can't ride through GeoJSON). Mirrors the web MapView marker shape.
 export type RosmMarker = {
@@ -357,7 +365,7 @@ export function RosmMap({
           onPress={followAgain}
           accessibilityRole="button"
           accessibilityLabel="Follow my location"
-          style={[styles.locationButton, { top: insets.top + 8 }]}
+          style={[styles.locationButton, { top: insets.top + LOCATION_BUTTON_TOP }]}
         >
           <CrosshairSimpleIcon size={22} color="#1d1d1f" weight="bold" />
         </Pressable>
@@ -370,9 +378,9 @@ const styles = StyleSheet.create({
   locationButton: {
     position: "absolute",
     left: 12,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: LOCATION_BUTTON_SIZE,
+    height: LOCATION_BUTTON_SIZE,
+    borderRadius: LOCATION_BUTTON_SIZE / 2,
     backgroundColor: "rgba(255, 255, 255, 0.92)",
     alignItems: "center",
     justifyContent: "center",
