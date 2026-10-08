@@ -6,9 +6,10 @@ import { readApiJson, type ApiReply } from "../apiResponse";
 
 // Where a queued edit is in its journey to OSM.
 //   pending  — on the device and still going to be sent: inside its undo hold,
-//              queued behind an older edit, or waiting to resend after a send
-//              that can work later (offline, signed out, server trouble), in
-//              which case `error` says what went wrong last time
+//              behind an older unsent edit to the same node, or waiting to
+//              resend after a send that can work later (offline, signed out,
+//              server trouble), in which case `error` says what went wrong last
+//              time
 //   sending  — POST in flight
 //   sent     — accepted by OSM
 //   failed   — the server refused the edit, or server errors outlasted every
@@ -25,12 +26,14 @@ export const UNDO_WINDOW_MS = 5000;
 // that would leave the node's tags unchanged.
 const SEND_TIMEOUT_MS = 30_000;
 
-// Resend backoff: 5 s, doubling per attempt, never more than 10 min.
+// Resend backoff after the nth failure in a row: 10 s, doubling, never more
+// than 10 min.
 const RETRY_BASE_MS = 5_000;
 const RETRY_MAX_MS = 10 * 60_000;
 
 // Server-side trouble (5xx, 408, 429, a reply that isn't ours) gets this many
-// tries before the edit is marked failed. Being offline or signed out never
+// tries per edit before the edit is marked failed: about 20 min of backoff for a
+// lone edit, longer when several take turns. Being offline or signed out never
 // gives up: those clear on their own, and the survey must not be lost meanwhile.
 const MAX_SERVER_FAILURES = 8;
 
@@ -62,7 +65,7 @@ export type OutboxItem = {
   // Server-side failures since enqueue or retryAll. Written by every failed
   // send, so a failed row without it was stored before resends were classified.
   serverFailures?: number;
-  nextAttemptAt?: number; // epoch ms: backoff; only a forced flush sends sooner
+  nextAttemptAt?: number; // epoch ms: not resent before then unless a flush is forced
   createdAt: string;
   holdUntil?: string; // ISO: flush skips the item until then (undo window)
   error?: string; // why the last send failed (on a pending item: why it waits)
@@ -95,9 +98,18 @@ let flushDone: Promise<void> = Promise.resolve();
 let rerun = false;
 let forceNext = false;
 
-// Single timer that wakes the queue when its head's undo hold or backoff ends,
-// so a waiting edit still sends if no other flush trigger (an edit, network,
-// foreground) fires first.
+// Queue-wide backoff. A send that gets no real answer (no connection, signed
+// out, server trouble) means the next one would most likely fail the same way,
+// whichever edit it carried, so nothing is sent until `pausedUntil`: one try per
+// pause rather than one per queued edit. The pause doubles with each such
+// failure in a row; a send the server answers (accepted or refused) or a forced
+// flush ends it.
+let failStreak = 0;
+let pausedUntil = 0;
+
+// Single timer that wakes the queue when its next edit is due, so a waiting
+// edit still sends if no other flush trigger (an edit, network, foreground)
+// fires first.
 let wakeTimer: ReturnType<typeof setTimeout> | undefined;
 
 type EnqueueInput = {
@@ -133,22 +145,40 @@ function uuid(): string {
 // device every send is simply attempted and a failure backs off.
 const offline = () => typeof navigator !== "undefined" && navigator.onLine === false;
 
-// The queue is strictly first in, first out: an edit never overtakes an older
-// unsent one. Two edits to the same node must reach OSM in the order they were
-// made (the latest survey wins), and while the oldest can't get through
-// (offline, signed out, OSM down) the ones behind it wouldn't either.
-const head = (items: OutboxItem[]) => items.find((i) => i.syncState === "pending");
+const endPause = () => {
+  failStreak = 0;
+  pausedUntil = 0;
+};
 
-// When an edit may next be sent: after its undo hold and, unless the flush is
-// forced, after its backoff.
-function dueAt(item: OutboxItem, force: boolean): number {
+// When an edit may next be sent: after its undo hold and its own backoff.
+function dueAt(item: OutboxItem): number {
   const hold = item.holdUntil ? Date.parse(item.holdUntil) || 0 : 0;
-  return Math.max(hold, force ? 0 : (item.nextAttemptAt ?? 0));
+  return Math.max(hold, item.nextAttemptAt ?? 0);
 }
 
+// The pending edits free to go once due. `items` is in creation order. An edit
+// waits while an older one to the same node is unsent, so the node's latest
+// survey is the last write OSM sees; edits to different nodes don't wait on
+// each other.
+function sendable(items: OutboxItem[]): OutboxItem[] {
+  const unsentNodes = new Set<number>();
+  const out: OutboxItem[] = [];
+  for (const i of items) {
+    if (i.syncState !== "pending" && i.syncState !== "sending") continue;
+    if (i.syncState === "pending" && !unsentNodes.has(i.nodeId)) out.push(i);
+    unsentNodes.add(i.nodeId);
+  }
+  return out;
+}
+
+// The edit due first, the oldest on a tie. An edit that just failed is backing
+// off, so the next turn goes to one that has waited longer: an edit the server
+// keeps failing on can't hold up the rest.
+const soonest = (items: OutboxItem[]) => items.reduce((a, b) => (dueAt(b) < dueAt(a) ? b : a));
+
 // Jittered so phones that lost the server together don't all resend in lockstep.
-function backoffMs(attempts: number): number {
-  const base = Math.min(RETRY_BASE_MS * 2 ** Math.max(attempts - 1, 0), RETRY_MAX_MS);
+function backoffMs(failures: number): number {
+  const base = Math.min(RETRY_BASE_MS * 2 ** failures, RETRY_MAX_MS);
   return Math.round(base * (0.8 + 0.2 * Math.random()));
 }
 
@@ -199,18 +229,32 @@ export const useOutbox = create<OutboxState>((set, get, store) => {
     corePorts().outboxStorage.put(item);
   };
 
-  // Put an edit back in line, to resend once its backoff has passed.
-  const resendLater = (item: OutboxItem, error: string) =>
+  // A send that got no real answer: pause the queue and put the edit back in
+  // line. The edit waits at least as long as the queue does, and longer when
+  // the server keeps failing on it in particular.
+  const backOff = (item: OutboxItem, error: string, serverFailure: boolean) => {
+    failStreak += 1;
+    pausedUntil = Date.now() + backoffMs(failStreak);
+    const serverFailures = (item.serverFailures ?? 0) + (serverFailure ? 1 : 0);
+    if (serverFailures >= MAX_SERVER_FAILURES) {
+      persist({ ...item, syncState: "failed", serverFailures, error, nextAttemptAt: undefined });
+      return;
+    }
+    const ownWait = serverFailure ? Date.now() + backoffMs(serverFailures) : 0;
     persist({
       ...item,
       syncState: "pending",
+      serverFailures,
       error,
-      nextAttemptAt: Date.now() + backoffMs(item.attempts ?? 1),
+      nextAttemptAt: Math.max(pausedUntil, ownWait),
     });
+  };
 
-  // One POST for the queue's head. Every outcome lands in the item's state:
-  // sent, failed, or pending again with a backoff. Never throws.
-  const send = async (item: OutboxItem) => {
+  // One POST. Every outcome lands in the item's state: sent, failed, or pending
+  // again with a backoff. Resolves whether the server gave a real answer (took
+  // or refused the edit), i.e. whether the next edit is worth sending now.
+  // Never throws.
+  const send = async (item: OutboxItem): Promise<boolean> => {
     // Counted before the request leaves: if the app dies mid-send, OSM may
     // already have the edit, and cancel() must stop treating it as unsent.
     const sending: OutboxItem = {
@@ -243,8 +287,8 @@ export const useOutbox = create<OutboxState>((set, get, store) => {
       // No reply at all: offline, timed out, connection dropped. Any rejection
       // counts, not only isTransportError's TypeError: on device, expo/fetch
       // rejects with its own FetchError.
-      resendLater(sending, e instanceof Error ? e.message : String(e));
-      return;
+      backOff(sending, e instanceof Error ? e.message : String(e), false);
+      return false;
     }
 
     // Every success carries newVersion, an unchanged one included.
@@ -262,36 +306,58 @@ export const useOutbox = create<OutboxState>((set, get, store) => {
         error: undefined,
         nextAttemptAt: undefined,
       });
-      return;
+      endPause();
+      return true;
     }
 
     // A 2xx without our body came from something in between, not the API.
     const kind = reply.ok ? "retry" : classify(reply);
     const error = reply.ok ? "Unexpected reply from the server" : reply.message;
-    const serverFailures = (sending.serverFailures ?? 0) + (kind === "retry" ? 1 : 0);
-    if (kind === "fail" || serverFailures >= MAX_SERVER_FAILURES) {
-      persist({ ...sending, syncState: "failed", serverFailures, error, nextAttemptAt: undefined });
-    } else {
-      resendLater({ ...sending, serverFailures }, error);
+    if (kind === "fail") {
+      persist({
+        ...sending,
+        syncState: "failed",
+        serverFailures: sending.serverFailures ?? 0,
+        error,
+        nextAttemptAt: undefined,
+      });
+      endPause();
+      return true;
+    }
+    backOff(sending, error, kind === "retry");
+    return false;
+  };
+
+  // A forced flush starts over: whatever held edits back may have cleared, so
+  // the queue's pause and every edit's backoff are dropped. Undo holds stay.
+  const startOver = () => {
+    endPause();
+    for (const i of get().items) {
+      if (i.syncState === "pending" && i.nextAttemptAt !== undefined) {
+        persist({ ...i, nextAttemptAt: undefined });
+      }
     }
   };
 
-  // Send from the head of the queue until it empties or the head has to wait.
-  // The head is re-read after every send, so edits enqueued or released from
-  // their hold meanwhile go out in the same loop.
+  // Send due edits until none is left or the queue has to pause. The queue is
+  // re-read before every send, so edits enqueued or released from their hold
+  // meanwhile go out in the same loop.
   const drain = async () => {
     flushing = true;
     try {
       do {
         rerun = false;
-        const force = forceNext;
-        forceNext = false;
+        if (forceNext) {
+          forceNext = false;
+          startOver();
+        }
         for (;;) {
-          const next = head(get().items);
-          if (!next || dueAt(next, force) > Date.now() || offline()) break;
-          await send(next);
-          // Still pending means it is backing off, and everything behind it waits.
-          if (get().items.find((i) => i.id === next.id)?.syncState === "pending") break;
+          if (offline() || Date.now() < pausedUntil) break;
+          const ready = sendable(get().items);
+          if (ready.length === 0) break;
+          const next = soonest(ready);
+          if (dueAt(next) > Date.now()) break;
+          if (!(await send(next))) break;
         }
       } while (rerun);
     } finally {
@@ -300,13 +366,14 @@ export const useOutbox = create<OutboxState>((set, get, store) => {
     }
   };
 
-  // Re-arm the wake timer for when the queue's head becomes due.
+  // Re-arm the wake timer for when the next edit is due and the queue isn't
+  // paused.
   const schedule = () => {
     clearTimeout(wakeTimer);
     wakeTimer = undefined;
-    const next = head(get().items);
-    if (!next) return;
-    const wait = dueAt(next, false) - Date.now();
+    const ready = sendable(get().items);
+    if (ready.length === 0) return;
+    const wait = Math.max(dueAt(soonest(ready)), pausedUntil) - Date.now();
     // Due already but offline: the reconnect trigger resumes the queue, and a
     // timer here would only spin.
     if (wait <= 0 && offline()) return;
@@ -385,10 +452,15 @@ export const useOutbox = create<OutboxState>((set, get, store) => {
       return item;
     },
 
-    // Send pending edits to OSM, oldest first, sharing one changeset. An edit
-    // waits out its undo hold and its backoff; `force` (reconnect, foreground,
-    // sign-in) skips the backoff, never the hold. Failed edits are left to
-    // retryAll. Afterwards the wake timer is re-armed for whatever still waits.
+    // Send pending edits to OSM, sharing one changeset: oldest first, except that
+    // an edit backing off doesn't hold up the others. An edit waits out its undo
+    // hold and its backoff, and nothing goes while the queue is paused after a
+    // failure; `force` (reconnect, foreground, sign-in) drops the pause and the
+    // backoffs, never the hold. Failed edits are left to retryAll. Afterwards the
+    // wake timer is re-armed for whatever still waits.
+    // Resolves once the loop is done, including passes added for callers that
+    // joined it. That can take minutes (up to 30 s per send), so a caller with a
+    // deadline starts it without awaiting and waits with waitUntilSettled.
     flush: (opts) => {
       if (opts?.force) forceNext = true;
       if (flushing) {
@@ -418,7 +490,8 @@ export const useOutbox = create<OutboxState>((set, get, store) => {
     },
 
     // Resolves true once nothing is pending or sending, false if that takes more
-    // than timeoutMs. It only watches; pair it with flush({ force: true }).
+    // than timeoutMs. It only watches. To send and wait a bounded time, start the
+    // flush without awaiting it: `void flush({ force: true })`, then await this.
     waitUntilSettled: (timeoutMs) =>
       new Promise<boolean>((resolve) => {
         const settled = () =>
@@ -475,6 +548,9 @@ export const useOutbox = create<OutboxState>((set, get, store) => {
     // included. Only for an explicit "discard"; pruneSent() is the routine tidy-up.
     clear: async () => {
       set({ items: [], changesetId: undefined });
+      endPause();
+      clearTimeout(wakeTimer);
+      wakeTimer = undefined;
       await corePorts().outboxStorage.clear();
       await corePorts().outboxStorage.setMeta(CHANGESET_META, undefined);
     },

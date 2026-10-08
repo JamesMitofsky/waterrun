@@ -61,9 +61,17 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
 });
 
-afterEach(() => {
+afterEach(async () => {
+  // The queue's pause after a failure is module state, not store state; clear()
+  // ends it so it can't hold up the next test.
+  await useOutbox.getState().clear();
   vi.useRealTimers();
 });
+
+// Backoff jitter off: every wait is its nominal length.
+const noJitter = () => vi.spyOn(Math, "random").mockReturnValue(1);
+
+const states = () => useOutbox.getState().items.map((i) => i.syncState);
 
 describe("enqueue", () => {
   it("records a pending item with the optimistic summary and persists it", () => {
@@ -166,7 +174,7 @@ describe("flush", () => {
     enqueueReady(2);
     await useOutbox.getState().flush();
 
-    expect(useOutbox.getState().items.map((i) => i.syncState)).toEqual(["sent", "sent"]);
+    expect(states()).toEqual(["sent", "sent"]);
     expect(useOutbox.getState().changesetId).toBe(42);
     expect(sentBody(1).changesetId).toBe(42);
   });
@@ -261,7 +269,7 @@ describe("failure handling", () => {
     expect(item.error).toBe("Network request failed");
     expect(item.nextAttemptAt).toBeGreaterThan(Date.now());
 
-    await vi.advanceTimersByTimeAsync(5_100); // first backoff is at most 5 s
+    await vi.advanceTimersByTimeAsync(10_100); // first backoff is at most 10 s
     item = only();
     expect(apiFetchMock).toHaveBeenCalledTimes(2);
     expect(item.syncState).toBe("sent");
@@ -405,24 +413,56 @@ describe("backoff", () => {
     expect(only().syncState).toBe("sent");
   });
 
-  it("doubles from 5 s up to a 10 min ceiling", async () => {
+  it("waits 10 s after the first failure, doubling each time up to 10 min", async () => {
     apiFetchMock.mockRejectedValue(new TypeError("Network request failed"));
     enqueueReady();
+    await useOutbox.getState().flush();
+
+    // Left to its wake timer, with no forced flush to start it over.
     const waits: number[] = [];
-    for (let i = 0; i < 10; i++) {
-      await useOutbox.getState().flush({ force: true });
-      waits.push((only().nextAttemptAt as number) - Date.now());
+    for (let i = 0; i < 9; i++) {
+      const wait = (only().nextAttemptAt as number) - Date.now();
+      waits.push(wait);
+      await vi.advanceTimersByTimeAsync(wait + 100);
     }
-    // Jitter keeps each wait within 80–100% of its nominal step.
-    const nominal = [5, 10, 20, 40, 80, 160, 320, 600, 600, 600].map((s) => s * 1000);
+    expect(apiFetchMock).toHaveBeenCalledTimes(10);
+    // Jitter keeps each wait within 80–100% of its nominal step (less the few
+    // ms between the failure and the reading).
+    const nominal = [10, 20, 40, 80, 160, 320, 600, 600, 600].map((s) => s * 1000);
     waits.forEach((w, i) => {
       expect(w).toBeLessThanOrEqual(nominal[i]);
-      expect(w).toBeGreaterThanOrEqual(nominal[i] * 0.8);
+      expect(w).toBeGreaterThanOrEqual(nominal[i] * 0.8 - 100);
     });
   });
 
-  it("holds every later edit behind one that is backing off, so edits keep their order", async () => {
-    apiFetchMock.mockRejectedValueOnce(new TypeError("Network request failed"));
+  it("pauses the whole queue when a send gets no reply, trying one edit per pause", async () => {
+    apiFetchMock.mockRejectedValue(new TypeError("Network request failed"));
+    enqueueReady(1);
+    enqueueReady(2);
+    enqueueReady(3);
+
+    await useOutbox.getState().flush();
+    expect(apiFetchMock).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(10_100);
+    expect(apiFetchMock).toHaveBeenCalledTimes(2);
+    // The next try goes to an edit that has waited, not the one that just failed.
+    expect(sentBody(1).nodeId).toBe(2);
+
+    apiFetchMock.mockImplementation(async () => accepted());
+    await vi.advanceTimersByTimeAsync(20_100);
+    expect(states()).toEqual(["sent", "sent", "sent"]);
+  });
+
+  it("lets edits to other nodes past one the server keeps failing on, keeping each node's order", async () => {
+    noJitter();
+    // Something about node 1 breaks the server's reply; node 2 is fine.
+    let node1Breaks = true;
+    apiFetchMock.mockImplementation(async (_path: string, init: RequestInit) =>
+      node1Breaks && JSON.parse(init.body as string).nodeId === 1
+        ? fail({ error: "OpenStreetMap sent a reply we couldn't read." }, 502)
+        : accepted(),
+    );
     useOutbox.getState().enqueue({ nodeId: 1, action: "out_of_order", tagKey: "amenity" });
     useOutbox.getState().enqueue({ nodeId: 1, action: "confirm", tagKey: "amenity" });
     useOutbox.getState().enqueue({ nodeId: 2, action: "confirm", tagKey: "amenity" });
@@ -430,17 +470,53 @@ describe("backoff", () => {
 
     await useOutbox.getState().flush();
     expect(apiFetchMock).toHaveBeenCalledTimes(1);
-    expect(useOutbox.getState().items.map((i) => i.attempts)).toEqual([1, 0, 0]);
 
-    apiFetchMock.mockImplementation(async () => accepted());
-    await vi.advanceTimersByTimeAsync(5_100);
-    expect(useOutbox.getState().items.map((i) => i.syncState)).toEqual(["sent", "sent", "sent"]);
+    // Once the queue's 10 s pause is over, node 2's edit goes; node 1's second
+    // edit stays behind its first.
+    await vi.advanceTimersByTimeAsync(10_100);
+    expect(states()).toEqual(["pending", "pending", "sent"]);
+    expect(useOutbox.getState().items[1].attempts).toBe(0);
+
+    node1Breaks = false;
+    await vi.advanceTimersByTimeAsync(20_100);
+    expect(states()).toEqual(["sent", "sent", "sent"]);
     // The node's last survey is the last write OSM sees.
-    expect([1, 2, 3].map((c) => sentBody(c).action)).toEqual([
+    const node1 = apiFetchMock.mock.calls.map((_, n) => sentBody(n)).filter((b) => b.nodeId === 1);
+    expect(node1.map((b) => b.action)).toEqual([
+      "out_of_order",
+      "out_of_order",
       "out_of_order",
       "confirm",
-      "confirm",
     ]);
+  });
+
+  it("starts over on a forced flush: a long offline backoff can't hold up the rest", async () => {
+    noJitter();
+    // Offline for a while: the two edits take turns failing, waiting longer each time.
+    apiFetchMock.mockRejectedValue(new TypeError("Network request failed"));
+    enqueueReady(1);
+    enqueueReady(2);
+    await useOutbox.getState().flush();
+    for (let turn = 0; turn < 5; turn++) {
+      const latest = Math.max(...useOutbox.getState().items.map((i) => i.nextAttemptAt ?? 0));
+      await vi.advanceTimersByTimeAsync(latest - Date.now() + 100);
+    }
+    expect(apiFetchMock).toHaveBeenCalledTimes(6);
+    expect(sentBody(5).nodeId).toBe(2);
+    const second = useOutbox.getState().items[1];
+    expect(second.nextAttemptAt as number).toBeGreaterThan(Date.now() + 5 * 60_000);
+
+    // Back online, but the server fails on node 1 in particular.
+    apiFetchMock.mockImplementation(async (_path: string, init: RequestInit) =>
+      JSON.parse(init.body as string).nodeId === 1
+        ? fail({ error: "OpenStreetMap returned an error (500)." }, 502)
+        : accepted(),
+    );
+    await useOutbox.getState().flush({ force: true });
+    expect(states()).toEqual(["pending", "pending"]);
+
+    await vi.advanceTimersByTimeAsync(10_100);
+    expect(states()[1]).toBe("sent");
   });
 
   it("lets later edits through once the one ahead fails for good", async () => {
