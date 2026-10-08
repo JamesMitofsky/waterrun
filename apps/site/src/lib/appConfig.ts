@@ -1,5 +1,5 @@
-// Web PWA identity (app/manifest.ts), re-exported from the shared @rosm/core
-// source so web and the Expo app agree on names/colors.
+// The site's identity, re-exported from the shared @rosm/core source so the
+// site and the Expo app agree on names/colors.
 import cfg from "@rosm/core/appConfig.json";
 
 export const APP_NAME = cfg.appName;

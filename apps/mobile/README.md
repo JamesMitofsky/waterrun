@@ -28,15 +28,18 @@ dev client. For a physical device, use an [EAS](https://docs.expo.dev/build/intr
 
 ## Environment
 
-Point a dev build at a locally running site (`pnpm dev` at the repo root, which serves
-http://localhost:4321) by copying the example env file:
+Point a dev build at a locally running site by copying the example env file. `pnpm dev`
+at the repo root serves the site on http://localhost:4321, reachable from the iOS
+simulator; for an Android emulator or a physical device the site has to listen beyond
+loopback, so start it with `pnpm --filter @rosm/site dev --host` instead.
 
 ```bash
 cp apps/mobile/.env.example apps/mobile/.env.local
 ```
 
 ```
-# Read only when __DEV__ is true. Simulator: http://localhost:4321.
+# Read only when __DEV__ is true. iOS simulator: http://localhost:4321.
+# Android emulator: http://10.0.2.2:4321 (the host machine as the emulator sees it).
 # Physical device: your machine's LAN IP, e.g. http://192.168.1.10:4321.
 EXPO_PUBLIC_DEV_API_BASE=http://localhost:4321
 

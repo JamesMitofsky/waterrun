@@ -47,8 +47,10 @@ Tests run on [Vitest](https://vitest.dev), in two packages:
 - `packages/core/tests/` — the shared logic: geo math, route planning, BRouter turn
   extraction, OSM tag transforms, schemas, and the run / planner / outbox stores and route
   archive, which run against in-memory fake ports (`tests/helpers/ports.ts`).
-- `apps/site/tests/lib/` — the site's own libs: the OSM and Overpass clients, the API
-  client, the JSON-file store, route progress, and the demo/replay runs.
+- `apps/site/tests/` — the site: `lib/` for its libs (the OSM, Overpass and upstream
+  clients, the API client, map tap and failure handling, route progress, the demo/replay
+  runs, the social card), `api/` for the `/api` route handlers (including the OAuth flow and
+  the OSM write statuses), and `scripts/` for the build scripts.
 
 ```bash
 pnpm test                                # both suites, through Turborepo
@@ -94,7 +96,6 @@ To preview a PR, a maintainer comments `/deploy` on it. Previews are built only 
 of this repo: a fork's code would run during the build with the deploy token in reach.
 
 - TypeScript strict mode is on; do not introduce `any` or `@ts-ignore` to silence errors.
-- Don't commit anything under `data/` — it is gitignored runtime state.
 
 ## Commit and PR conventions
 

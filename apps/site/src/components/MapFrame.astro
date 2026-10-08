@@ -362,9 +362,9 @@ const frameCss = aspectCss + sizeCss + spinnerCss;
   const UNMOUNT_FALLBACK_MS = MAP_REVEAL_MS + 400;
   /**
    * Last resort. `MapView` reports ready on load, on idle, on error and on its
-   * own 20s load timeout, so the only way the overlay is still up past this is
-   * that the island's JS never ran at all. A stale picture of a map beats a
-   * loading state that never ends.
+   * own load timeout (20s of the tab being visible), so in a visible tab the
+   * only way the overlay is still up past this is that the island's JS never
+   * ran at all. A stale picture of a map beats a loading state that never ends.
    */
   const BACKSTOP_MS = 25_000;
 

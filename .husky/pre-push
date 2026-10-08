@@ -1,6 +1,6 @@
 # Last local gate before code reaches the remote. Mirrors the CI "Quality"
 # job (.github/workflows/ci.yml) so failures surface here — in seconds — rather
-# than on a red main after Vercel has already deployed. pre-commit + lint-staged
+# than on a red PR. pre-commit + lint-staged
 # only touches *staged* files; this re-checks every tracked file on every push.
 #
 # Scope is git-TRACKED files, not the whole working tree: untracked scratch

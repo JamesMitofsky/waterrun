@@ -30,6 +30,9 @@ export default defineConfig({
   // shared links — is told to update it rather than follow it every time.
   redirects: {
     "/dc-drinking-fountains": { status: 301, destination: "/public-drinking-fountains" },
+    // The social card was a PNG; previews cached before it became a JPEG may
+    // still ask for the old URL.
+    "/opengraph-image.png": { status: 301, destination: "/opengraph-image.jpg" },
   },
   vite: {
     plugins: [tailwindcss()],
