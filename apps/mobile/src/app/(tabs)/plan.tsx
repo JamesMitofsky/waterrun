@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Text, useWindowDimensions, View } from "react-native";
+import { ActivityIndicator, Alert, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { PointSheetHost } from "../../components/ui/PointSheetHost";
 import { usePlanner, inRouteIdsOf } from "@rosm/core/stores/planner";
@@ -28,7 +28,6 @@ function markLabel(f: Fountain) {
 // itself lives on the standalone /run screen.
 export default function Plan() {
   const router = useRouter();
-  const { width: winW } = useWindowDimensions();
 
   // Narrow slices only — the map re-diffs its native sources on prop changes,
   // so busy/err churn in the panels must not reach it.
@@ -133,8 +132,9 @@ export default function Plan() {
   );
 
   const startRun = useCallback(async () => {
-    await usePlanner.getState().startRun();
-    router.replace("/run");
+    // Only leave the planner for a run that really started; otherwise the
+    // planner's error (e.g. the route is still updating) is shown here.
+    if (await usePlanner.getState().startRun()) router.replace("/run");
   }, [router]);
 
   const confirmEndRun = useCallback(() => {

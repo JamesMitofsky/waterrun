@@ -164,7 +164,10 @@ type PlannerState = {
   // must still apply.
   resumeDraft: (d?: Draft) => void;
   dismissDraft: () => void;
-  startRun: () => Promise<void>;
+  // Resolves true once the run is set up; false when there is nothing to run
+  // or the route is still catching up (with `err` saying why), so the caller
+  // stays on the planner instead of opening an empty run.
+  startRun: () => Promise<boolean>;
   // The state-clearing half of leaving a finished run; the page also resets the
   // run session. Keeps the start area so the surveyor can build another route.
   resetAfterRun: () => void;
@@ -739,7 +742,7 @@ export const usePlanner = create<PlannerState>((set, get) => ({
     const { center, stops, pinnedIds, loop, tag, vias, fountains, line, distanceM, turns } = get();
     const effectiveStops =
       stops.length > 0 ? stops : fountains.filter((f) => pinnedIds.includes(f.id));
-    if (!center || effectiveStops.length === 0) return;
+    if (!center || effectiveStops.length === 0) return false;
     if (get().routeStale) {
       // The stops and line on hand predate the latest change, so the run would
       // follow a route the map no longer shows. A route error already says why
@@ -747,7 +750,7 @@ export const usePlanner = create<PlannerState>((set, get) => ({
       if (!get().err) {
         set({ err: "Your route is still updating. Try again once it has caught up." });
       }
-      return;
+      return false;
     }
     const runStops: RunStop[] = effectiveStops.map((f) => ({ ...f, status: "pending" }));
     const plan = {
@@ -764,17 +767,13 @@ export const usePlanner = create<PlannerState>((set, get) => ({
       turns,
     };
     useRun.getState().setPlan(plan);
-    await corePorts().api.apiFetch("/api/run", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...plan, index: 0 }),
-    });
     // Route promoted to an active run; drop the planner draft so we don't re-offer it.
     corePorts()
       .api.apiFetch("/api/draft", { method: "DELETE" })
       .catch(() => {});
     // Stay on this map — just hand the side panel over to the live run.
     set({ phase: "run" });
+    return true;
   },
 
   resetAfterRun: () =>

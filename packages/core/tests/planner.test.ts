@@ -365,7 +365,7 @@ describe("startRun", () => {
     });
     apiFetchMock.mockResolvedValue(ok({ ok: true }));
 
-    await usePlanner.getState().startRun();
+    await expect(usePlanner.getState().startRun()).resolves.toBe(true);
 
     expect(usePlanner.getState().phase).toBe("run");
     const run = useRun.getState();
@@ -374,7 +374,7 @@ describe("startRun", () => {
     expect(run.stops.every((s) => s.status === "pending")).toBe(true);
     // Plan coords flip back to BRouter's [lon,lat] order for persistence.
     expect(run.routeCoords[0]).toEqual([-77.03, 38.9]);
-    expect(apiFetchMock).toHaveBeenCalledWith("/api/run", expect.anything());
+    expect(apiFetchMock).not.toHaveBeenCalledWith("/api/run", expect.anything());
     expect(apiFetchMock).toHaveBeenCalledWith("/api/draft", { method: "DELETE" });
   });
 });
@@ -485,7 +485,7 @@ describe("routeStale", () => {
     // The previous route is still on hand, including the point just removed.
     expect(s.stops.map((f) => f.id)).toContain(3);
 
-    await usePlanner.getState().startRun();
+    await expect(usePlanner.getState().startRun()).resolves.toBe(false);
 
     s = usePlanner.getState();
     expect(useRun.getState().hasPlan).toBe(false);
@@ -513,7 +513,7 @@ describe("routeStale", () => {
     apiFetchMock.mockImplementationOnce(() => new Promise<Response>(() => {}));
 
     usePlanner.getState().addVia(38.905, -77.03);
-    await usePlanner.getState().startRun();
+    await expect(usePlanner.getState().startRun()).resolves.toBe(false);
 
     expect(useRun.getState().hasPlan).toBe(false);
     expect(usePlanner.getState().err).toMatch(/still updating/);
