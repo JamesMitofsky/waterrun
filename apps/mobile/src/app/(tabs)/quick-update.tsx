@@ -11,7 +11,7 @@ import { api } from "../../ports/api";
 import { geolocation } from "../../ports/geolocation";
 import { celebratePoint } from "../../ports/confetti";
 import { hapticSuccess } from "../../ports/haptics";
-import { BottomSheet, RNHostView } from "@expo/ui";
+import { PointSheetHost } from "../../components/ui/PointSheetHost";
 import { RosmMap, type RosmMarker, type RosmRegion } from "../../map/RosmMap";
 import { PointSheet, type PointEdit, type SurveyAction } from "../../components/PointSheet";
 
@@ -235,33 +235,22 @@ export default function QuickUpdate() {
       ) : null}
 
       {/* Native OS bottom sheet (SwiftUI / Jetpack Compose via @expo/ui). The
-          gesture + spring run off the JS thread; PointSheet stays plain RN,
-          bridged in through RNHostView. */}
-      {/* No snapPoints → iOS fitToContents / Android intrinsic height: the sheet
-          hugs its content instead of opening to a fixed (over-tall) detent that
-          leaves the card floating mid-screen. */}
-      <BottomSheet isPresented={selectedId != null} onDismiss={() => setSelectedId(null)}>
-        {/* matchContents sizes the host to its child's *intrinsic* size and
-            ignores an explicit width on the host itself. So the explicit width
-            goes on the child: intrinsic width becomes full sheet width (window −
-            the sheet's 16px L/R padding), and matchContents wraps to it. */}
-        <RNHostView matchContents>
-          <View style={{ width: winW - 32 }}>
-            {selected ? (
-              <PointSheet
-                fountain={selected}
-                edit={edits[selected.id]}
-                onAction={(action, extras) => record(selected, action, extras)}
-              />
-            ) : (
-              // Sheet opened instantly on tap; spin until the point resolves.
-              <View className="items-center justify-center py-12">
-                <ActivityIndicator />
-              </View>
-            )}
+          gesture + spring run off the JS thread; PointSheet stays plain RN.
+          PointSheetHost owns the sizing workaround and the keyboard. */}
+      <PointSheetHost isPresented={selectedId != null} onDismiss={() => setSelectedId(null)}>
+        {selected ? (
+          <PointSheet
+            fountain={selected}
+            edit={edits[selected.id]}
+            onAction={(action, extras) => record(selected, action, extras)}
+          />
+        ) : (
+          // Sheet opened instantly on tap; spin until the point resolves.
+          <View className="items-center justify-center py-12">
+            <ActivityIndicator />
           </View>
-        </RNHostView>
-      </BottomSheet>
+        )}
+      </PointSheetHost>
     </View>
   );
 }

@@ -1,11 +1,16 @@
 import { useMemo, useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
-import { CheckCircleIcon, SnowflakeIcon, WarningIcon, WrenchIcon } from "phosphor-react-native";
+import { Pressable, Text, View } from "react-native";
+import { CheckCircleIcon } from "phosphor-react-native/src/icons/CheckCircle";
+import { SnowflakeIcon } from "phosphor-react-native/src/icons/Snowflake";
+import { WarningIcon } from "phosphor-react-native/src/icons/Warning";
+import { WrenchIcon } from "phosphor-react-native/src/icons/Wrench";
 import type { Audience, Dispenser, EditExtras } from "@rosm/core/schemas";
 import { audienceFromTags } from "@rosm/core/audience";
 import { dispenserFromTags } from "@rosm/core/dispenser";
+import { NOTE_MAX, hasQuickTag, normalizeNote, toggleQuickTag } from "@rosm/core/note";
 import { AudienceToggle } from "./AudienceToggle";
 import { DispenserToggle } from "./DispenserToggle";
+import { TextField } from "./ui/TextField";
 
 const QUICK_TAGS = [
   "Not draining",
@@ -68,29 +73,37 @@ export function PointDetailsForm({
   const [dispenser, setDispenser] = useState<Dispenser>(defaults.dispenser);
   const [seasonal, setSeasonal] = useState(defaults.seasonal);
   const [note, setNote] = useState(defaults.note);
+  const [error, setError] = useState<string | null>(null);
 
-  function toggleQuickTag(tagText: string) {
-    if (note.includes(tagText)) {
-      const updated = note
-        .split(";")
-        .map((s) => s.trim())
-        .filter((s) => s !== tagText)
-        .join("; ");
-      setNote(updated);
-    } else {
-      setNote(note ? `${note}; ${tagText}` : tagText);
-    }
+  function editNote(next: string) {
+    setNote(next);
+    setError(null);
   }
 
+  // Each pill's next note, or null when adding it would overflow NOTE_MAX.
+  const quickTags = QUICK_TAGS.map((tag) => ({
+    tag,
+    active: hasQuickTag(note, tag),
+    next: toggleQuickTag(note, tag),
+  }));
+
   function handleSubmit() {
-    const trimmed = note.trim();
+    const cleaned = normalizeNote(note);
+    // Stop here rather than queue an edit the server will reject for good:
+    // only the user can shorten their note. The note is the one free-text
+    // field EditExtras can refuse (a core test pins NOTE_MAX to its limit), so
+    // this avoids pulling zod into the app bundle just to safeParse.
+    if (cleaned.length > NOTE_MAX) {
+      setError(`Shorten the note to ${NOTE_MAX} characters (it has ${cleaned.length}).`);
+      return;
+    }
     if (isRemoved) {
-      onSubmit(trimmed ? { note: trimmed } : undefined);
+      onSubmit(cleaned ? { note: cleaned } : undefined);
       return;
     }
     const extras: EditExtras = { audience, dispenser };
     if (seasonal && !outOfOrder) extras.seasonal = true;
-    if (trimmed) extras.note = trimmed;
+    if (cleaned) extras.note = cleaned;
     onSubmit(extras, isProblem ? problemType : undefined);
   }
 
@@ -184,23 +197,30 @@ export function PointDetailsForm({
             What&apos;s wrong with the fountain?
           </Text>
           <View className="flex-row flex-wrap gap-1.5 pb-1">
-            {QUICK_TAGS.map((tag) => {
-              const active = note.includes(tag);
-              return (
-                <Pressable
-                  key={tag}
-                  onPress={() => toggleQuickTag(tag)}
-                  className={`rounded-lg border px-2.5 py-1.5 ${
-                    active ? "border-amber-600 bg-amber-500" : "border-border bg-surface-deep"
-                  }`}
-                >
-                  <Text className={`text-xs font-bold ${active ? "text-white" : "text-base"}`}>
-                    {tag}
-                  </Text>
-                </Pressable>
-              );
-            })}
+            {quickTags.map(({ tag, active, next }) => (
+              <Pressable
+                key={tag}
+                onPress={() => next !== null && editNote(next)}
+                disabled={next === null}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active, disabled: next === null }}
+                // Half the 6px gap, so neighbouring pills' targets never overlap.
+                hitSlop={3}
+                className={`rounded-lg border px-2.5 py-2 ${
+                  active ? "border-amber-600 bg-amber-500" : "border-border bg-surface-deep"
+                } ${next === null ? "opacity-40" : ""}`}
+              >
+                <Text className={`text-xs font-bold ${active ? "text-white" : "text-base"}`}>
+                  {tag}
+                </Text>
+              </Pressable>
+            ))}
           </View>
+          {quickTags.some((q) => q.next === null) ? (
+            <Text className="text-muted text-xs font-semibold">
+              Note is full. Shorten it to add more.
+            </Text>
+          ) : null}
         </View>
       ) : null}
 
@@ -208,23 +228,25 @@ export function PointDetailsForm({
         <Text className="text-base text-xs font-bold tracking-wider uppercase">
           {broken ? "Details / Note" : "Public Note"}
         </Text>
-        <TextInput
+        <TextField
           value={note}
-          onChangeText={setNote}
+          onChangeText={editNote}
           placeholder={broken ? "Describe what's wrong…" : "Add a public note (optional)"}
           placeholderTextColor="#57544a"
           multiline
-          maxLength={255}
+          maxLength={NOTE_MAX}
           className="border-border min-h-20 rounded-xl border bg-white p-3.5 text-base text-sm font-medium"
         />
+        {error ? <Text className="text-sm font-semibold text-red-600">{error}</Text> : null}
       </View>
 
       <View className="flex-row gap-3 pt-2">
         {onCancel ? (
+          // Intrinsic width, so the submit label keeps the rest of the row.
           <Pressable
             onPress={onCancel}
             accessibilityRole="button"
-            className="border-border bg-surface-deep flex-1 items-center justify-center rounded-xl border px-4 py-3"
+            className="border-border bg-surface-deep items-center justify-center rounded-xl border px-4 py-3"
           >
             <Text className="text-base font-bold">Back</Text>
           </Pressable>

@@ -1,12 +1,10 @@
 import { useState } from "react";
 import { Linking, Pressable, Text, View } from "react-native";
-import {
-  ArrowSquareOutIcon,
-  CheckCircleIcon,
-  SnowflakeIcon,
-  TrashIcon,
-  WarningIcon,
-} from "phosphor-react-native";
+import { ArrowSquareOutIcon } from "phosphor-react-native/src/icons/ArrowSquareOut";
+import { CheckCircleIcon } from "phosphor-react-native/src/icons/CheckCircle";
+import { SnowflakeIcon } from "phosphor-react-native/src/icons/Snowflake";
+import { TrashIcon } from "phosphor-react-native/src/icons/Trash";
+import { WarningIcon } from "phosphor-react-native/src/icons/Warning";
 import { DogIcon } from "./icons/DogIcon";
 import type { EditAction, EditExtras, Fountain } from "@rosm/core/schemas";
 import type { SyncState } from "@rosm/core/stores/outbox";
@@ -149,6 +147,8 @@ export function PointSheet({ fountain, edit, onAction, inRoute, onToggleRoute }:
           {edit.changesetUrl ? (
             <Pressable
               onPress={() => Linking.openURL(edit.changesetUrl!)}
+              // A 16pt line of text; the slop makes it a 44pt target.
+              hitSlop={14}
               className="mt-0.5 flex-row items-center gap-1"
             >
               <ArrowSquareOutIcon size={14} color="#0c0d0a" />
@@ -164,6 +164,7 @@ export function PointSheet({ fountain, edit, onAction, inRoute, onToggleRoute }:
           submitBox={detailFor === "confirm" ? "bg-green-600" : "bg-red-600"}
           isRemoved={detailFor === "removed"}
           isProblem={detailFor === "problem"}
+          onCancel={() => setDetailFor(null)}
           onSubmit={(extras, action) => {
             onAction(action ?? (detailFor as SurveyAction), extras);
             setDetailFor(null);

@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, useWindowDimensions, View } from "react-native";
 import { useRouter } from "expo-router";
-import { BottomSheet, RNHostView } from "@expo/ui";
-import { CheckCircleIcon, SkipBackIcon, SkipForwardIcon, XCircleIcon } from "phosphor-react-native";
+import { PointSheetHost } from "../components/ui/PointSheetHost";
+import { CheckCircleIcon } from "phosphor-react-native/src/icons/CheckCircle";
+import { SkipBackIcon } from "phosphor-react-native/src/icons/SkipBack";
+import { SkipForwardIcon } from "phosphor-react-native/src/icons/SkipForward";
+import { XCircleIcon } from "phosphor-react-native/src/icons/XCircle";
 import { DogIcon } from "../components/icons/DogIcon";
 import { fmtDist } from "@rosm/core/geo";
 import { STATUS_COLOR } from "@rosm/core/editStatus";
@@ -297,44 +300,36 @@ export default function RunScreen() {
         {s.err ? <Text className="text-red-400">{s.err}</Text> : null}
       </View>
 
-      <BottomSheet isPresented={selectedId != null} onDismiss={() => setSelectedId(null)}>
-        <RNHostView matchContents>
-          <View style={{ width: winW - 32 }}>
-            {selectedPoint ? (
-              <PointSheet
-                fountain={selectedPoint}
-                edit={selectedEdit}
-                onAction={(action, extras) => {
-                  s.recordFor(selectedPoint, action, extras);
-                  setSelectedId(null);
-                }}
-              />
-            ) : null}
-          </View>
-        </RNHostView>
-      </BottomSheet>
+      <PointSheetHost isPresented={selectedId != null} onDismiss={() => setSelectedId(null)}>
+        {selectedPoint ? (
+          <PointSheet
+            fountain={selectedPoint}
+            edit={selectedEdit}
+            onAction={(action, extras) => {
+              s.recordFor(selectedPoint, action, extras);
+              setSelectedId(null);
+            }}
+          />
+        ) : null}
+      </PointSheetHost>
 
-      <BottomSheet isPresented={addLocation != null} onDismiss={() => setAddLocation(null)}>
-        <RNHostView matchContents>
-          <View style={{ width: winW - 32 }}>
-            {addLocation ? (
-              <PointSheet
-                fountain={{
-                  id: -1,
-                  lat: addLocation.lat,
-                  lon: addLocation.lon,
-                  tags: { amenity: "drinking_water" },
-                }}
-                onAction={async (_action, extras) => {
-                  const loc = addLocation;
-                  setAddLocation(null);
-                  await s.addAt(loc, extras);
-                }}
-              />
-            ) : null}
-          </View>
-        </RNHostView>
-      </BottomSheet>
+      <PointSheetHost isPresented={addLocation != null} onDismiss={() => setAddLocation(null)}>
+        {addLocation ? (
+          <PointSheet
+            fountain={{
+              id: -1,
+              lat: addLocation.lat,
+              lon: addLocation.lon,
+              tags: { amenity: "drinking_water" },
+            }}
+            onAction={async (_action, extras) => {
+              const loc = addLocation;
+              setAddLocation(null);
+              await s.addAt(loc, extras);
+            }}
+          />
+        ) : null}
+      </PointSheetHost>
     </View>
   );
 }
