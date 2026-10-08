@@ -280,10 +280,19 @@ export type NodeData = {
   lat: number;
   lon: number;
   tags: Record<string, string>;
+  // The changeset that wrote this version, as read (getNode). Writes ignore it
+  // and name their own.
+  changeset?: number;
 };
 
 type NodeJson = {
-  elements?: { lat: number; lon: number; version: number; tags?: Record<string, string> }[];
+  elements?: {
+    lat: number;
+    lon: number;
+    version: number;
+    changeset?: number;
+    tags?: Record<string, string>;
+  }[];
 };
 
 export async function getNode(token: string, id: number): Promise<NodeData> {
@@ -296,7 +305,13 @@ export async function getNode(token: string, id: number): Promise<NodeData> {
   // Deleted/redacted nodes return an empty elements array. Surface a clear error
   // instead of crashing on `el.version`.
   if (!el) throw new OsmApiError(410, "get node", `node ${id} not found (deleted or redacted)`);
-  return { version: el.version, lat: el.lat, lon: el.lon, tags: el.tags ?? {} };
+  return {
+    version: el.version,
+    lat: el.lat,
+    lon: el.lon,
+    tags: el.tags ?? {},
+    changeset: typeof el.changeset === "number" ? el.changeset : undefined,
+  };
 }
 
 // A specific historical version of a node — the "before" state an undo restores.
@@ -507,7 +522,8 @@ const DAY_MS = 86_400_000;
 // How far back a client's survey date may reach: an offline queue can sync days
 // after the run, but not weeks.
 const SURVEY_DATE_MAX_AGE_DAYS = 30;
-const SurveyDateField = z.object({ surveyDate: z.iso.date() });
+const IsoDate = z.iso.date();
+const SurveyDateField = z.object({ surveyDate: IsoDate });
 
 // The check_date for a write, from the raw request body: the surveyor's own
 // calendar date when the client sent one (the outbox captures it on the device
@@ -525,4 +541,22 @@ export function surveyDateFor(body: unknown, now = new Date()): string {
   const base = Date.parse(today);
   if (day < base - SURVEY_DATE_MAX_AGE_DAYS * DAY_MS || day > base + DAY_MS) return today;
   return parsed.data.surveyDate;
+}
+
+// The check_date an edit leaves on a point: the survey's date, unless the point
+// already carries a later one. A queued edit can reach OSM days after the
+// survey, by which time someone may have checked the point again; writing the
+// older date would make it look staler than its last real check. Only a full
+// date that could be real counts: a partial one ("2026-10") or one past
+// tomorrow, the same bound surveyDateFor uses, is replaced.
+export function checkDateFor(
+  existing: string | undefined,
+  surveyDate: string,
+  now = new Date(),
+): string {
+  const parsed = IsoDate.safeParse(existing);
+  if (!parsed.success) return surveyDate;
+  const tomorrow = todayIso(new Date(now.getTime() + DAY_MS));
+  // YYYY-MM-DD strings sort by date.
+  return parsed.data > surveyDate && parsed.data <= tomorrow ? parsed.data : surveyDate;
 }

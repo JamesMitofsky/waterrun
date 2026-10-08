@@ -9,6 +9,7 @@ import {
   applyAction,
   sameTags,
   surveyDateFor,
+  checkDateFor,
   changesetUrl,
   isChangesetUnusable,
   isVersionConflict,
@@ -23,7 +24,13 @@ export const prerender = false;
 const CHANGESET_COMMENT = "Survey: drinking water / amenity status check";
 const MAX_ATTEMPTS = 3;
 
-type EditResult = { newVersion: number; changesetId?: number; unchanged?: true };
+type EditResult = {
+  newVersion: number;
+  changesetId?: number;
+  // The check_date the node ends up with, for the summary.
+  checkDate: string;
+  unchanged?: true;
+};
 
 // One write attempt: re-read the node so the version sent always matches the
 // current db version (OSM rejects a stale version with 409), then PUT. The
@@ -43,17 +50,31 @@ async function putWithRetry(
   reopened = false,
 ): Promise<EditResult> {
   const node = await getNode(token, edit.nodeId);
-  const tags = applyAction(node.tags, edit.action, edit.tagKey, surveyDate, edit.extras);
+  const checkDate = checkDateFor(node.tags.check_date, surveyDate);
+  const tags = applyAction(node.tags, edit.action, edit.tagKey, checkDate, edit.extras);
   // The node already says exactly what this edit would write. Usually that is
   // the client sending again an edit whose reply it never got (it timed out
   // after OSM had accepted the PUT); answering with the current version instead
   // of writing an identical one makes that resend harmless.
-  if (sameTags(node.tags, tags)) return { newVersion: node.version, changesetId, unchanged: true };
+  if (sameTags(node.tags, tags)) {
+    return {
+      newVersion: node.version,
+      // Every success names a changeset, the one the client carries on with. A
+      // client without one yet gets the changeset that wrote the node's
+      // current version: after a lost reply that is the one its first try
+      // opened, so the run's later edits join it and the run closes it. If the
+      // version is someone else's, the next write finds that changeset
+      // unusable and moves to a fresh one of the user's own.
+      changesetId: changesetId ?? node.changeset,
+      checkDate,
+      unchanged: true,
+    };
+  }
 
   const target = changesetId ?? (await openChangeset(token, CHANGESET_COMMENT));
   try {
     const newVersion = await putNode(token, edit.nodeId, { ...node, tags }, target);
-    return { newVersion, changesetId: target };
+    return { newVersion, changesetId: target, checkDate };
   } catch (e) {
     if (isChangesetUnusable(e) && !reopened) {
       // Reopening doesn't consume a version-conflict retry: same attempt count.
@@ -79,7 +100,7 @@ export const POST: APIRoute = async ({ request }) => {
   const surveyDate = surveyDateFor(body);
 
   try {
-    const { newVersion, changesetId, unchanged } = await putWithRetry(
+    const { newVersion, changesetId, checkDate, unchanged } = await putWithRetry(
       token,
       parsed.data,
       surveyDate,
@@ -88,7 +109,6 @@ export const POST: APIRoute = async ({ request }) => {
     if (!unchanged) logOsmWrite({ nodeId, action, changesetId, newVersion });
 
     return Response.json({
-      // Absent only when nothing was written and the client had no changeset yet.
       changesetId,
       changesetUrl: changesetId ? changesetUrl(changesetId) : undefined,
       nodeId,
@@ -97,7 +117,7 @@ export const POST: APIRoute = async ({ request }) => {
       // Nothing was written: `newVersion` is the node's current one, which an
       // undo must not revert, since it may not be ours.
       unchanged,
-      summary: editSummary(action, tagKey, surveyDate, extras),
+      summary: editSummary(action, tagKey, checkDate, extras),
     });
   } catch (e) {
     const { status, error, retryable } = osmFailure(e);

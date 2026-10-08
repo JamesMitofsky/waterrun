@@ -8,8 +8,9 @@ const NODE_URL = `${API_BASE}/api/0.6/node/1`;
 // 22:30 on 2026-10-07 in DC, already the 8th in UTC.
 const NOW = new Date("2026-10-08T02:30:00Z");
 
-const node = (version: number, tags: Record<string, string>) =>
-  json({ elements: [{ lat: 38.9, lon: -77, version, tags }] });
+// `changeset` is the one that wrote this version, as OSM reports it.
+const node = (version: number, tags: Record<string, string>, changeset = 30) =>
+  json({ elements: [{ lat: 38.9, lon: -77, version, changeset, tags }] });
 
 const edit = (
   body: Record<string, unknown>,
@@ -85,16 +86,67 @@ describe("POST /api/osm/edit — idempotent resend", () => {
     expect(console.info).not.toHaveBeenCalled();
   });
 
-  it("doesn't open a changeset just to write nothing", async () => {
+  it("names the changeset behind the current version rather than open one to write nothing", async () => {
     fetchMock.mockResolvedValueOnce(
-      node(4, { amenity: "drinking_water", check_date: "2026-10-08" }),
+      node(4, { amenity: "drinking_water", check_date: "2026-10-08" }, 42),
     );
 
     const res = await edit({});
-    const body = await res.json();
-    expect(body.newVersion).toBe(4);
-    expect(body.changesetId).toBeUndefined();
+    expect(await res.json()).toMatchObject({
+      changesetId: 42,
+      changesetUrl: expect.stringMatching(/\/changeset\/42$/),
+      newVersion: 4,
+      unchanged: true,
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers the resend of a first edit whose reply was lost as sent, in the changeset it opened", async () => {
+    // The first send opens changeset 42 and lands, but the client gives up on
+    // it before the reply arrives, so it still has no changeset of its own.
+    fetchMock
+      .mockResolvedValueOnce(node(3, { amenity: "drinking_water" }))
+      .mockResolvedValueOnce(text("42"))
+      .mockResolvedValueOnce(text("4"));
+    await edit({ surveyDate: "2026-10-07" });
+
+    fetchMock.mockResolvedValueOnce(
+      node(4, { amenity: "drinking_water", check_date: "2026-10-07" }, 42),
+    );
+    const res = await edit({ surveyDate: "2026-10-07" });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    // What the outbox needs to count the edit as sent and keep the changeset.
+    expect(typeof body.changesetId).toBe("number");
+    expect(body).toMatchObject({ changesetId: 42, newVersion: 4, unchanged: true });
+    expect(puts(fetchMock)).toHaveLength(1);
+  });
+});
+
+describe("POST /api/osm/edit — check_date never goes back", () => {
+  it("writes nothing for a queued confirm that a later check already covers", async () => {
+    fetchMock.mockResolvedValueOnce(
+      node(5, { amenity: "drinking_water", check_date: "2026-10-05" }),
+    );
+
+    const res = await edit({ changesetId: 42, surveyDate: "2026-10-01" });
+    const body = await res.json();
+    expect(body).toMatchObject({ newVersion: 5, unchanged: true });
+    expect(body.summary).toContain("check_date=2026-10-05");
+    expect(puts(fetchMock)).toHaveLength(0);
+  });
+
+  it("keeps the later check_date when a queued edit changes the status", async () => {
+    fetchMock
+      .mockResolvedValueOnce(node(5, { amenity: "drinking_water", check_date: "2026-10-05" }))
+      .mockResolvedValueOnce(text("6"));
+
+    const res = await edit({ action: "out_of_order", changesetId: 42, surveyDate: "2026-10-01" });
+    const body = await res.json();
+    expect(body.summary).toContain("check_date=2026-10-05");
+    const sent = puts(fetchMock)[0][1].body;
+    expect(sent).toContain('<tag k="disused:amenity" v="drinking_water"/>');
+    expect(sent).toContain('<tag k="check_date" v="2026-10-05"/>');
   });
 });
 

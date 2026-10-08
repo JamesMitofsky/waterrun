@@ -26,6 +26,7 @@ import {
   safeReturnPath,
   sameTags,
   surveyDateFor,
+  checkDateFor,
   todayIso,
 } from "@/lib/osm";
 import { APP_NAME } from "@/lib/appConfig";
@@ -448,6 +449,13 @@ describe("nodes", () => {
     expect(fetchMock.mock.calls[0][0]).toBe(`${API_BASE}/api/0.6/node/99.json`);
   });
 
+  it("getNode reports the changeset that wrote the current version", async () => {
+    fetchMock.mockResolvedValueOnce(
+      json({ elements: [{ lat: 1, lon: 2, version: 4, changeset: 42, tags: {} }] }),
+    );
+    expect((await getNode("tok", 1)).changeset).toBe(42);
+  });
+
   it("getNode defaults missing tags to {}", async () => {
     fetchMock.mockResolvedValueOnce(json({ elements: [{ lat: 1, lon: 2, version: 1 }] }));
     expect((await getNode("tok", 1)).tags).toEqual({});
@@ -725,5 +733,29 @@ describe("surveyDateFor", () => {
     expect(surveyDateFor({ surveyDate: "2026-02-30" }, now)).toBe("2026-10-08");
     expect(surveyDateFor({ surveyDate: "2026-10-07T12:00:00Z" }, now)).toBe("2026-10-08");
     expect(surveyDateFor({ surveyDate: 20261007 }, now)).toBe("2026-10-08");
+  });
+});
+
+describe("checkDateFor", () => {
+  const now = new Date("2026-10-08T02:30:00Z");
+
+  it("writes the survey's date over an older check", () => {
+    expect(checkDateFor("2025-04-01", "2026-10-07", now)).toBe("2026-10-07");
+  });
+
+  it("never moves a later check back to an older survey's date", () => {
+    expect(checkDateFor("2026-10-05", "2026-10-01", now)).toBe("2026-10-05");
+  });
+
+  it("keeps a later check up to tomorrow, for zones east of UTC", () => {
+    expect(checkDateFor("2026-10-09", "2026-10-07", now)).toBe("2026-10-09");
+  });
+
+  it("replaces a check_date that can't be a real survey", () => {
+    expect(checkDateFor("2062-10-07", "2026-10-07", now)).toBe("2026-10-07");
+    expect(checkDateFor("2026-10", "2026-10-07", now)).toBe("2026-10-07");
+    expect(checkDateFor("2026-02-30", "2026-10-07", now)).toBe("2026-10-07");
+    expect(checkDateFor("yesterday", "2026-10-07", now)).toBe("2026-10-07");
+    expect(checkDateFor(undefined, "2026-10-07", now)).toBe("2026-10-07");
   });
 });
