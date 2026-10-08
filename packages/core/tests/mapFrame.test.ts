@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  COVER_FALLBACK_ZOOM,
+  COVER_MAX_ZOOM,
+  COVER_MIN_ZOOM,
   FRAME_MARGIN,
   FRAME_MIN_SIZE,
   FRAME_MIN_SPAN_M,
   frameBounds,
   framePadding,
+  zoomToCover,
 } from "../src/mapFrame";
-import { haversine, type Pt } from "../src/geo";
+import { boundsRadiusM, haversine, milesToMeters, toRad, type Bounds, type Pt } from "../src/geo";
 
 // Width and height in meters of a [w, s, e, n] box, measured through its middle.
 function spanM([w, s, e, n]: [number, number, number, number]) {
@@ -117,5 +121,73 @@ describe("framePadding", () => {
     const p = framePadding({ width: 300, height: 400, coverTop: 0, coverBottom: 1000 });
     expect(Math.min(p.top, p.right, p.bottom, p.left)).toBeGreaterThanOrEqual(0);
     expect(400 - p.top - p.bottom).toBeCloseTo(FRAME_MIN_SIZE, 6);
+  });
+});
+
+describe("zoomToCover", () => {
+  const PHONE = { width: 390, height: 844 };
+  const MILE = milesToMeters(1);
+
+  // The [w, s, e, n] box a `size` map centered on `c` shows at `zoom`, from
+  // MapLibre's meters per point (512-point tiles) and meters per degree.
+  function viewBounds(c: Pt, zoom: number, size: { width: number; height: number }): Bounds {
+    const mPerPt = (40_075_016.686 * Math.cos(toRad(c.lat))) / (512 * 2 ** zoom);
+    const mPerDeg = 40_075_016.686 / 360;
+    const dLat = ((size.height / 2) * mPerPt) / mPerDeg;
+    const dLon = ((size.width / 2) * mPerPt) / (mPerDeg * Math.cos(toRad(c.lat)));
+    return [c.lon - dLon, c.lat - dLat, c.lon + dLon, c.lat + dLat];
+  }
+
+  it("shows a map whose center-to-corner reach is the radius", () => {
+    const cases = [
+      { c: { lat: 40.7, lon: -74 }, radiusM: MILE, size: PHONE },
+      { c: { lat: 0, lon: 10 }, radiusM: 500, size: { width: 1024, height: 768 } },
+      { c: { lat: 60, lon: 25 }, radiusM: 10_000, size: PHONE },
+    ];
+    for (const { c, radiusM, size } of cases) {
+      const reach = boundsRadiusM(viewBounds(c, zoomToCover(radiusM, c.lat, size), size));
+      expect(Math.abs(reach / radiusM - 1)).toBeLessThan(0.02);
+    }
+  });
+
+  it("zooms out for a bigger radius", () => {
+    expect(zoomToCover(2 * MILE, 40, PHONE)).toBeLessThan(zoomToCover(MILE, 40, PHONE));
+    // Twice the radius is exactly one zoom level out.
+    expect(zoomToCover(MILE, 40, PHONE) - zoomToCover(2 * MILE, 40, PHONE)).toBeCloseTo(1, 6);
+  });
+
+  it("zooms out farther from the equator, where the map stretches", () => {
+    expect(zoomToCover(MILE, 60, PHONE)).toBeLessThan(zoomToCover(MILE, 40, PHONE));
+    expect(zoomToCover(MILE, -60, PHONE)).toBeCloseTo(zoomToCover(MILE, 60, PHONE), 6);
+  });
+
+  it("shows a mile around a phone's center at about zoom 14", () => {
+    expect(Math.abs(zoomToCover(MILE, 40, PHONE) - 14.1)).toBeLessThanOrEqual(0.15);
+  });
+
+  it("stays in range at the extremes", () => {
+    expect(zoomToCover(0.01, 40, PHONE)).toBe(COVER_MAX_ZOOM);
+    expect(zoomToCover(1e9, 40, PHONE)).toBe(COVER_MIN_ZOOM);
+    expect(zoomToCover(MILE, 90, PHONE)).toBe(COVER_MIN_ZOOM);
+  });
+
+  it("falls back to a fixed zoom when there is no view to fit", () => {
+    const degenerate = [
+      zoomToCover(MILE, 40, { width: 0, height: 0 }),
+      zoomToCover(MILE, 40, { width: -390, height: 844 }),
+      zoomToCover(MILE, 40, { width: Infinity, height: 844 }),
+      zoomToCover(0, 40, PHONE),
+      zoomToCover(-MILE, 40, PHONE),
+      zoomToCover(NaN, 40, PHONE),
+      zoomToCover(Infinity, 40, PHONE),
+      zoomToCover(MILE, NaN, PHONE),
+      zoomToCover(MILE, 120, PHONE),
+    ];
+    for (const z of degenerate) {
+      expect(Number.isFinite(z)).toBe(true);
+      expect(z).toBe(COVER_FALLBACK_ZOOM);
+    }
+    expect(COVER_FALLBACK_ZOOM).toBeGreaterThanOrEqual(COVER_MIN_ZOOM);
+    expect(COVER_FALLBACK_ZOOM).toBeLessThanOrEqual(COVER_MAX_ZOOM);
   });
 });
