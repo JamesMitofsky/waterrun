@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { withUniwind } from "uniwind";
-import { useIsFocused, useRouter } from "expo-router";
+import { useFocusEffect, useIsFocused, useRouter } from "expo-router";
 import { SafeArea } from "../../components/ui/SafeArea";
-import { getArchivedRoutes } from "@rosm/core/routeArchive";
+import { getArchivedRouteIndex, type ArchivedRouteSummary } from "@rosm/core/routeArchive";
 import { fmtDist } from "@rosm/core/geo";
 import { useOsmStatus } from "../../auth/useOsmStatus";
 import { useOsmUser } from "../../auth/useOsmUser";
@@ -15,9 +15,6 @@ import { Panel } from "../../components/ui/Panel";
 // expo-image isn't a core RN component, so Uniwind doesn't wire `className` →
 // `style` for it out of the box. Wrap once so Tailwind classes apply.
 const StyledImage = withUniwind(Image);
-
-const surveyedCount = (stops: { status: string }[]) =>
-  stops.filter((s) => s.status !== "pending" && s.status !== "skipped").length;
 
 // True from the first time this tab is shown. Native tabs render every tab at
 // launch (expo-router has no lazy option), and this one would otherwise fetch
@@ -40,8 +37,11 @@ function ProfileContent() {
   const router = useRouter();
   const { status } = useOsmStatus();
   const user = useOsmUser();
-  const routes = getArchivedRoutes();
-  const totalSurveyed = routes.reduce((n, r) => n + surveyedCount(r.plan.stops), 0);
+  // Read from the archive's small index, not the runs themselves, and again
+  // each time the tab is shown, so a run finished since is listed.
+  const [routes, setRoutes] = useState<ArchivedRouteSummary[]>(getArchivedRouteIndex);
+  useFocusEffect(useCallback(() => setRoutes(getArchivedRouteIndex()), []));
+  const totalSurveyed = routes.reduce((n, r) => n + r.surveyedCount, 0);
 
   return (
     <SafeArea className="bg-surface flex-1" edges={["top", "bottom"]}>
@@ -110,8 +110,8 @@ function ProfileContent() {
                 className="border-border border-t py-2.5"
               >
                 <Text className="text-base">
-                  {new Date(r.updatedAt).toLocaleDateString()} · {fmtDist(r.plan.distanceM)} ·{" "}
-                  {r.plan.stops.length} stops
+                  {new Date(r.updatedAt).toLocaleDateString()} · {fmtDist(r.distanceM)} ·{" "}
+                  {r.stopCount} stops
                 </Text>
               </Pressable>
             ))

@@ -1,7 +1,8 @@
+import { useMemo } from "react";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { ScrollView, Text, View } from "react-native";
 import { SafeArea } from "../components/ui/SafeArea";
-import { getArchivedRoutes } from "@rosm/core/routeArchive";
+import { getArchivedRoute } from "@rosm/core/routeArchive";
 import { STATUS_COLOR } from "@rosm/core/editStatus";
 import { RosmMap, type RosmMarker } from "../map/RosmMap";
 import { fmtDist } from "@rosm/core/geo";
@@ -14,7 +15,8 @@ export default function RunDetail() {
   // `fresh` is set only when arriving straight from finishing a run — the live
   // session state is gone, so this snapshot is the last chance to screenshot.
   const justFinished = fresh === "1";
-  const route = getArchivedRoutes().find((r) => r.routeId === id);
+  // This one run, read once: not the whole archive, and not on every render.
+  const route = useMemo(() => getArchivedRoute(id), [id]);
 
   if (!route) {
     return (
