@@ -3,8 +3,6 @@ import { ActivityIndicator, Alert, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { PointSheetHost } from "../../components/ui/PointSheetHost";
 import { usePlanner, inRouteIdsOf } from "@rosm/core/stores/planner";
-import { useRun } from "@rosm/core/stores/run";
-import { useOutbox } from "@rosm/core/stores/outbox";
 import { fmtDist } from "@rosm/core/geo";
 import type { Fountain } from "@rosm/core/schemas";
 import { Button } from "../../components/ui/Button";
@@ -15,6 +13,7 @@ import { PhaseNav } from "../../components/planner/PhaseNav";
 import { usePlannerMarkers } from "../../components/planner/usePlannerMarkers";
 import { usePlannerDraftSync } from "../../components/planner/usePlannerDraftSync";
 import { useOsmEdits } from "../../run/useOsmEdits";
+import { endRun } from "../../run/runLifecycle";
 import { PointSheet } from "../../components/PointSheet";
 import { hapticSelect } from "../../ports/haptics";
 
@@ -137,18 +136,11 @@ export default function Plan() {
     if (await usePlanner.getState().startRun()) router.replace("/run");
   }, [router]);
 
+  // The same teardown as Finish on the run screen: unsent edits stay queued.
   const confirmEndRun = useCallback(() => {
     Alert.alert("End this run?", "Progress is archived; queued edits keep syncing.", [
       { text: "Cancel", style: "cancel" },
-      {
-        text: "End run",
-        style: "destructive",
-        onPress: () => {
-          useRun.getState().reset();
-          useOutbox.getState().clear();
-          usePlanner.getState().resetAfterRun();
-        },
-      },
+      { text: "End run", style: "destructive", onPress: () => void endRun() },
     ]);
   }, []);
 

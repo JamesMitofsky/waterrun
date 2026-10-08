@@ -10,15 +10,15 @@ import {
 import { compass, type Pt } from "@rosm/core/geo";
 import { ptLabel } from "@rosm/core/pointTypes";
 import { STATUS_COLOR } from "@rosm/core/editStatus";
-import { archiveRoute, getArchivedRoutes } from "@rosm/core/routeArchive";
+import { getArchivedRoutes } from "@rosm/core/routeArchive";
+import { archiveRun, beginRun } from "@rosm/core/runLifecycle";
 import { progressLine } from "@rosm/core/runProgress";
 import type { EditAction, EditExtras, Fountain } from "@rosm/core/schemas";
 import type { SurveyAction } from "../components/PointSheet";
 import { api } from "../ports/api";
 import { getToken } from "../auth/authStore";
 import { useOsmStatus } from "../auth/useOsmStatus";
-import { watchRunPosition } from "../ports/geolocation";
-import type { GeoWatch } from "@rosm/core/ports";
+import { trackRun } from "../tasks/runLocationTask";
 import { hapticSuccess } from "../ports/haptics";
 import { keepAwake, allowSleep } from "../ports/keepAwake";
 import { celebratePoint } from "../ports/confetti";
@@ -41,7 +41,8 @@ const SAVED_LABEL: Record<SurveyAction, string> = {
 
 // The Expo run session: live GPS, the shared guidance derived from it, the OSM
 // recording actions, and marker DATA for RosmMap. Mirrors the web useRunSession
-// but returns markers as plain data (the screen owns the bottom sheet).
+// but returns markers as plain data (the screen owns the bottom sheet). Ending
+// the run is run/runLifecycle's endRun, not part of the session.
 export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
   const run = useRun();
   const { status: osm } = useOsmStatus();
@@ -51,8 +52,6 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
   const [err, setErr] = useState<string | null>(null);
   const [hydrating, setHydrating] = useState(() => enabled && !useRun.getState().hasPlan);
   const [lastSaved, setLastSaved] = useState<{ nodeId: number; label: string } | null>(null);
-  const [finishing, setFinishing] = useState(false);
-  const [closed, setClosed] = useState<{ changesetUrl?: string } | null>(null);
 
   // Cold start (direct nav to /run): recover the most recent archived run.
   useEffect(() => {
@@ -64,23 +63,19 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
     });
   }, [enabled]);
 
-  // Live position (background task via the geolocation port).
+  // Mark the run active, then follow it: the background location task, which
+  // runs only while a run is active and a screen listens (see
+  // tasks/runLocationTask).
+  const { hasPlan, routeId } = run;
   useEffect(() => {
-    if (!enabled) return;
-    let watch: GeoWatch | null = null;
-    let cancelled = false;
-    watchRunPosition(
+    if (!enabled || !hasPlan) return;
+    beginRun();
+    const watch = trackRun(
       (p) => setPos({ lat: p.lat, lon: p.lon }),
       (msg) => setErr(msg),
-    ).then((w) => {
-      if (cancelled) w.clear();
-      else watch = w;
-    });
-    return () => {
-      cancelled = true;
-      watch?.clear();
-    };
-  }, [enabled]);
+    );
+    return () => watch.clear();
+  }, [enabled, hasPlan, routeId]);
 
   // Keep the screen awake + ask for notification permission while armed.
   useEffect(() => {
@@ -93,7 +88,7 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
   const { stops, index, tagKey, tagValue, added, pool, routeCoords, turns } = run;
   const addLabel = ptLabel(tagKey, tagValue);
   const target: RunStop | undefined = stops[index];
-  const done = run.hasPlan && index >= stops.length;
+  const done = hasPlan && index >= stops.length;
 
   // The stretch of route between the previous stop and this one, so the
   // guidance doesn't latch onto another pass of a route that doubles back.
@@ -162,35 +157,12 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
     if (!done) notifiedDoneRef.current = false;
   }, [enabled, done, stops]);
 
-  const persist = useCallback(
-    (nextIndex: number, changesetId?: number) => {
-      const routeId = useRun.getState().routeId;
-      const plan = {
-        start: run.start,
-        loop: run.loop,
-        tagKey,
-        tagValue,
-        stops: useRun.getState().stops,
-        vias: run.vias,
-        pool: run.pool,
-        added: useRun.getState().added,
-        routeCoords: run.routeCoords,
-        distanceM: run.distanceM,
-        turns: run.turns,
-        index: nextIndex,
-        changesetId: changesetId ?? run.changesetId,
-      };
-      archiveRoute({ routeId, plan, edits: useOutbox.getState().items });
-    },
-    [run, tagKey, tagValue],
-  );
-
   const advance = useCallback(() => {
     const ni = index + 1;
     run.setIndex(ni);
     setManualArrived(false);
-    persist(ni);
-  }, [index, run, persist]);
+    archiveRun(ni);
+  }, [index, run]);
 
   const recordFor = useCallback(
     (node: Fountain, action: SurveyAction, extras?: EditExtras) => {
@@ -206,10 +178,10 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
       // advance() archives the run at the next stop; a node off the current
       // stop is archived where the run stands.
       if (isCurrent) advance();
-      else persist(index);
+      else archiveRun(index);
       useOutbox.getState().flush();
     },
-    [target, tagKey, run, index, persist, advance],
+    [target, tagKey, run, index, advance],
   );
 
   const record = useCallback(
@@ -235,8 +207,8 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
     setManualArrived(false);
     run.setStatus(stops[pi].id, "pending");
     run.setIndex(pi);
-    persist(pi);
-  }, [index, stops, run, persist]);
+    archiveRun(pi);
+  }, [index, stops, run]);
 
   // Create a brand-new node of the surveyed type at a given spot (GPS position or tapped map location).
   const addAt = useCallback(
@@ -265,18 +237,19 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
         const j = await r.json();
         if (!r.ok) throw new Error(j.error || "create failed");
         useOutbox.getState().setChangeset(j.changesetId);
+        run.setChangeset(j.changesetId);
         run.addNode({ id: j.nodeId, lat: j.lat, lon: j.lon, tags: j.tags });
         celebratePoint();
         hapticSuccess();
         setLastSaved({ nodeId: j.nodeId, label: "Added" });
-        persist(index, j.changesetId);
+        archiveRun(index);
       } catch (e) {
         setErr((e as Error).message);
       } finally {
         setAdding(false);
       }
     },
-    [tagKey, tagValue, run, index, persist],
+    [tagKey, tagValue, run, index],
   );
 
   const addHere = useCallback(async () => {
@@ -287,46 +260,12 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
     await addAt(pos);
   }, [pos, addAt]);
 
-  // Close the OSM changeset and mark the run done. Returns true on success so
-  // the screen can navigate to the run summary only when the run really ended.
-  const finish = useCallback(async (): Promise<boolean> => {
-    setFinishing(true);
-    try {
-      const changesetId = useOutbox.getState().changesetId;
-      if (changesetId) {
-        const r = await api.apiFetch("/api/osm/close", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ changesetId }),
-        });
-        const j = await r.json();
-        const alreadyClosed = typeof j.error === "string" && /was closed/i.test(j.error);
-        if ((!r.ok || j.ok === false) && !alreadyClosed) throw new Error(j.error || "close failed");
-        useOutbox.getState().setChangeset(undefined);
-        setClosed({ changesetUrl: j.changesetUrl });
-      } else {
-        setClosed({});
-      }
-      return true;
-    } catch (e) {
-      setErr((e as Error).message);
-      return false;
-    } finally {
-      setFinishing(false);
-    }
-  }, []);
-
-  const reset = useCallback(() => {
-    run.reset();
-    useOutbox.getState().clear();
-  }, [run]);
-
   const endEarly = useCallback(() => {
     setLastSaved(null);
     setManualArrived(false);
     run.setIndex(stops.length);
-    persist(stops.length);
-  }, [stops.length, run, persist]);
+    archiveRun(stops.length);
+  }, [stops.length, run]);
 
   const line: [number, number][] = useMemo(
     () => routeCoords.map(([lon, lat]) => [lat, lon]),
@@ -382,7 +321,7 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
     fitPoints,
     hydrating,
     done,
-    routeId: run.routeId,
+    routeId,
     stops,
     index,
     target,
@@ -398,8 +337,6 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
     adding,
     err,
     lastSaved,
-    finishing,
-    closed,
     setManualArrived,
     recordFor,
     record,
@@ -408,8 +345,6 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
     endEarly,
     addHere,
     addAt,
-    finish,
-    reset,
   };
 }
 

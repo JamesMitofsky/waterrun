@@ -13,6 +13,7 @@ import type { StopStatus } from "@rosm/core/stores/run";
 import { useOutbox } from "@rosm/core/stores/outbox";
 import { RosmMap } from "../map/RosmMap";
 import { useRunSession } from "../run/useRunSession";
+import { endRun } from "../run/runLifecycle";
 import { PointSheet } from "../components/PointSheet";
 import { Button } from "../components/ui/Button";
 
@@ -62,10 +63,12 @@ export default function RunScreen() {
     [s.stops],
   );
 
-  const handleFinish = async () => {
-    const ok = await s.finish();
-    if (ok && s.routeId)
-      router.replace({ pathname: "/run-detail", params: { id: s.routeId, fresh: "1" } });
+  // Finishing never waits on the network: the run ends on the device and the
+  // summary opens at once; the changeset closes in the background.
+  const handleFinish = () => {
+    const routeId = endRun();
+    if (routeId) router.replace({ pathname: "/run-detail", params: { id: routeId, fresh: "1" } });
+    else router.replace("/plan");
   };
 
   const onMarkerPress = (id: number | string) => {
@@ -176,12 +179,7 @@ export default function RunScreen() {
                 No points surveyed. Finish to save your route.
               </Text>
             )}
-            <Button
-              title="Finish run"
-              variant="blue"
-              onPress={handleFinish}
-              loading={s.finishing}
-            />
+            <Button title="Finish run" variant="blue" onPress={handleFinish} />
           </>
         ) : s.target ? (
           <>
