@@ -292,6 +292,20 @@ describe("fetchOverpass — deadline and cancellation", () => {
     await expect(p).rejects.toMatchObject({ timedOut: true });
   });
 
+  it("gives each attempt no more than the caller's per-attempt limit", async () => {
+    vi.useFakeTimers();
+    fakeTimeoutSignals();
+    const fetchMock = hangingFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const p = mod.fetchOverpass(query, { deadlineMs: 15_000, attemptTimeoutMs: 7_000 });
+    const assertion = expect(p).rejects.toMatchObject({ timedOut: true });
+    await vi.advanceTimersByTimeAsync(7_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(8_000);
+    await assertion;
+  });
+
   it("stops trying further mirrors once the caller aborts", async () => {
     const ctrl = new AbortController();
     const fetchMock = vi.fn().mockImplementation(async () => {

@@ -19,6 +19,10 @@ const PUBLIC_CACHE = "public, max-age=300, s-maxage=3600, stale-while-revalidate
 // Below LiveFountainMap's 20 s client timeout, so the visitor gets our answer
 // (results, or an error saying why) rather than a timeout of its own.
 const PUBLIC_DEADLINE_MS = 15_000;
+// Under half the deadline, so a first mirror that hangs or is too busy to
+// answer still leaves the second one its whole turn. A healthy mirror answers
+// one city-sized box well inside that.
+const PUBLIC_ATTEMPT_TIMEOUT_MS = 7_000;
 const NO_STORE = { "Cache-Control": "no-store" };
 
 // Only the point types a client can actually pick. Every real caller asks for
@@ -60,6 +64,7 @@ export const GET: APIRoute = async ({ request }) => {
     const fountains = await fetchFountains({ bounds }, PUBLIC_MAP_TAG, "any", 6, true, {
       signal: request.signal,
       deadlineMs: PUBLIC_DEADLINE_MS,
+      attemptTimeoutMs: PUBLIC_ATTEMPT_TIMEOUT_MS,
     });
     return Response.json({ fountains }, { headers: { "Cache-Control": PUBLIC_CACHE } });
   } catch (e) {

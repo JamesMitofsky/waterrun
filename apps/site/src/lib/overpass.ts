@@ -28,8 +28,9 @@ const OVERPASS_ENDPOINTS = [
 // busy server, and a mirror that can't finish in time says so (a runtime-error
 // remark) early enough to leave room for the next mirror.
 const QUERY_TIMEOUT_S = 15;
-// Per-attempt client limit: past the server's own budget, so a busy mirror gets
-// to answer or report its timeout before we give up on it.
+// Per-attempt client limit, unless the caller sets its own: past the server's
+// own budget, so a busy mirror gets to answer or report its timeout before we
+// give up on it.
 const ATTEMPT_TIMEOUT_MS = (QUERY_TIMEOUT_S + 5) * 1000;
 // Total budget across every mirror and retry, unless the caller sets its own.
 const DEFAULT_DEADLINE_MS = 25_000;
@@ -104,6 +105,9 @@ export type FetchOverpassOptions = {
   signal?: AbortSignal;
   // Total time budget across every mirror and retry.
   deadlineMs?: number;
+  // The most one attempt may take. A caller with a short deadline keeps this
+  // under half of it, so a mirror that hangs still leaves the next one a turn.
+  attemptTimeoutMs?: number;
 };
 
 // Fetch an Overpass query within a deadline, falling back across mirrors.
@@ -114,7 +118,11 @@ export type FetchOverpassOptions = {
 // operators ask clients not to do, and a hung mirror rarely recovers in seconds.
 export async function fetchOverpass(
   query: string,
-  { signal, deadlineMs = DEFAULT_DEADLINE_MS }: FetchOverpassOptions = {},
+  {
+    signal,
+    deadlineMs = DEFAULT_DEADLINE_MS,
+    attemptTimeoutMs = ATTEMPT_TIMEOUT_MS,
+  }: FetchOverpassOptions = {},
 ): Promise<{ elements: OverpassEl[] }> {
   const deadline = Date.now() + deadlineMs;
   let lastError: OverpassError | null = null;
@@ -131,7 +139,7 @@ export async function fetchOverpass(
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: new URLSearchParams({ data: query }).toString(),
-          timeoutMs: Math.min(remaining, ATTEMPT_TIMEOUT_MS),
+          timeoutMs: Math.min(remaining, attemptTimeoutMs),
           signal,
         });
       } catch (e) {

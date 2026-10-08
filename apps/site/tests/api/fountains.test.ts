@@ -94,6 +94,28 @@ describe("GET /api/fountains", () => {
     expect((await res.json()).error.retryable).toBe(true);
   });
 
+  it("falls back to the next mirror inside the deadline when the first one hangs", async () => {
+    vi.useFakeTimers();
+    fakeTimeoutSignals();
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(hangingFetch())
+      .mockResolvedValueOnce(json({ elements }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const started = Date.now();
+    const p = get("?region=dc");
+    await vi.advanceTimersByTimeAsync(7_000);
+    const res = await p;
+    expect(Date.now() - started).toBeLessThanOrEqual(7_000);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe(PUBLIC_CACHE);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "https://overpass-api.de/api/interpreter",
+      "https://overpass.kumi.systems/api/interpreter",
+    ]);
+  });
+
   it("stops calling Overpass once the visitor has gone", async () => {
     const fetchMock = hangingFetch();
     vi.stubGlobal("fetch", fetchMock);
