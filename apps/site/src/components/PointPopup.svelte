@@ -15,15 +15,13 @@
 </script>
 
 <script lang="ts">
-  import {
-    CheckCircle,
-    MinusCircle,
-    PlusCircle,
-    Snowflake,
-    Trash,
-    Warning,
-    Wrench,
-  } from "phosphor-svelte";
+  import CheckCircle from "phosphor-svelte/lib/CheckCircle";
+  import MinusCircle from "phosphor-svelte/lib/MinusCircle";
+  import PlusCircle from "phosphor-svelte/lib/PlusCircle";
+  import Snowflake from "phosphor-svelte/lib/Snowflake";
+  import Trash from "phosphor-svelte/lib/Trash";
+  import Warning from "phosphor-svelte/lib/Warning";
+  import Wrench from "phosphor-svelte/lib/Wrench";
   import DogIcon from "@/components/icons/DogIcon.svelte";
   import { getMapPopup } from "@/lib/mapPopup";
   import type { Fountain, EditAction } from "@rosm/core/schemas";
@@ -77,8 +75,15 @@
     onToggleRoute?: () => void;
   } = $props();
 
-  const { close } = getMapPopup();
+  const { close, holdOpen } = getMapPopup();
   let detailFor = $state<DetailAction | null>(null);
+  // The detail step is a draft — a status picked, maybe a note half typed — so
+  // a tap on the map only lowers the keyboard while it is open (see
+  // `holdOpen`). Cancel and submit leave it as before.
+  $effect(() => {
+    holdOpen(detailFor !== null);
+    return () => holdOpen(false);
+  });
   // Snapshot the clock once — the "checked ago" label doesn't need to tick live.
   const now = Date.now();
 </script>

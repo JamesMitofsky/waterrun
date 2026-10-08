@@ -1,6 +1,12 @@
-// Single entry point for talking to the ROSM backend (the Astro `/api` endpoints).
-// The site and its API share an origin, so the base is empty and the httpOnly OSM
-// cookie carries auth automatically.
+// Single entry point for talking to the Water Run backend (the Astro `/api`
+// endpoints). The site and its API share an origin, so the base is empty and the
+// httpOnly OSM cookie carries auth automatically.
+import { ApiTimeoutError } from "@rosm/core/apiResponse";
+
+// The shared class, not a copy: the mobile app's adapter throws the same one, so
+// an `instanceof` check (or core's `isTransportError`) reads a timeout the same
+// way whichever app made the request.
+export { ApiTimeoutError };
 
 // Trailing slash stripped so `${API_BASE}${path}` never double-slashes.
 const API_BASE = (import.meta.env.PUBLIC_API_BASE ?? "").replace(/\/$/, "");
@@ -10,16 +16,6 @@ const API_BASE = (import.meta.env.PUBLIC_API_BASE ?? "").replace(/\/$/, "");
 export function apiUrl(path: string): string {
   if (/^https?:\/\//.test(path)) return path;
   return `${API_BASE}${path}`;
-}
-
-// Thrown when `apiFetch` aborts a request because it exceeded `timeoutMs`.
-// Distinct from a caller-initiated abort so the UI can show a "took too long"
-// message rather than a generic network error.
-export class ApiTimeoutError extends Error {
-  constructor(public readonly timeoutMs: number) {
-    super(`Request timed out after ${timeoutMs}ms`);
-    this.name = "ApiTimeoutError";
-  }
 }
 
 export async function apiFetch(

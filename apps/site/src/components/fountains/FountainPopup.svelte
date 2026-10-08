@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Wrench } from "phosphor-svelte";
+  import Wrench from "phosphor-svelte/lib/Wrench";
   import DogIcon from "@/components/icons/DogIcon.svelte";
   import type { Fountain } from "@rosm/core/schemas";
   import { isDogWater, isOutOfService } from "@rosm/core/fountainFilters";
