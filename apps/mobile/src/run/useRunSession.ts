@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRun, type RunStop } from "@rosm/core/stores/run";
 import { useOutbox } from "@rosm/core/stores/outbox";
-import { runGuidance, ARRIVAL_RADIUS_M, PROXIMITY_RADIUS_M } from "@rosm/core/guidance";
-import { compass, routeHeadingAt, fmtDist, type Pt } from "@rosm/core/geo";
+import {
+  runGuidance,
+  guidanceWindow,
+  ARRIVAL_RADIUS_M,
+  PROXIMITY_RADIUS_M,
+} from "@rosm/core/guidance";
+import { compass, fmtDist, type Pt } from "@rosm/core/geo";
 import { ptLabel } from "@rosm/core/pointTypes";
 import { STATUS_COLOR } from "@rosm/core/editStatus";
 import { archiveRoute, getArchivedRoutes } from "@rosm/core/routeArchive";
@@ -39,7 +44,6 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
   const run = useRun();
   const { status: osm } = useOsmStatus();
   const [pos, setPos] = useState<Pt | null>(null);
-  const [gpsHeading, setGpsHeading] = useState<number | null>(null);
   const [manualArrived, setManualArrived] = useState(false);
   const [adding, setAdding] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -64,10 +68,7 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
     let watch: GeoWatch | null = null;
     let cancelled = false;
     watchRunPosition(
-      (p) => {
-        setPos({ lat: p.lat, lon: p.lon });
-        if (p.heading != null) setGpsHeading(p.heading);
-      },
+      (p) => setPos({ lat: p.lat, lon: p.lon }),
       (msg) => setErr(msg),
     ).then((w) => {
       if (cancelled) w.clear();
@@ -87,16 +88,24 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
     return () => allowSleep();
   }, [enabled]);
 
-  const { stops, index, tagKey, tagValue, added, pool } = run;
+  const { stops, index, tagKey, tagValue, added, pool, routeCoords, turns } = run;
   const addLabel = ptLabel(tagKey, tagValue);
   const target: RunStop | undefined = stops[index];
   const done = run.hasPlan && index >= stops.length;
 
+  // The stretch of route between the previous stop and this one, so the
+  // guidance doesn't latch onto another pass of a route that doubles back.
+  // Changes only with the stop, not with each fix.
+  const stretch = useMemo(
+    () => guidanceWindow(routeCoords, stops, index),
+    [routeCoords, stops, index],
+  );
   const { distToTarget, bearingTo, nextTurn, distToTurn, autoArrived } = runGuidance(
     pos,
     target ?? null,
-    run.routeCoords,
-    run.turns,
+    routeCoords,
+    turns,
+    stretch,
   );
   const heading = target ? compass(bearingTo) : "";
   const arrived = manualArrived || autoArrived;
@@ -178,12 +187,10 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
       celebratePoint();
       hapticSuccess();
       setLastSaved({ nodeId: node.id, label: SAVED_LABEL[action] });
-      if (isCurrent) {
-        persist(index + 1);
-        advance();
-      } else {
-        persist(index);
-      }
+      // advance() archives the run at the next stop; a node off the current
+      // stop is archived where the run stands.
+      if (isCurrent) advance();
+      else persist(index);
       useOutbox.getState().flush();
     },
     [target, tagKey, run, index, persist, advance],
@@ -305,19 +312,9 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
     persist(stops.length);
   }, [stops.length, run, persist]);
 
-  const mapBearing = useMemo(
-    () =>
-      pos && run.routeCoords.length > 1
-        ? (routeHeadingAt(run.routeCoords, pos) ?? (target ? bearingTo : gpsHeading))
-        : pos && target
-          ? bearingTo
-          : gpsHeading,
-    [pos, run.routeCoords, target, bearingTo, gpsHeading],
-  );
-
   const line: [number, number][] = useMemo(
-    () => run.routeCoords.map(([lon, lat]) => [lat, lon]),
-    [run.routeCoords],
+    () => routeCoords.map(([lon, lat]) => [lat, lon]),
+    [routeCoords],
   );
 
   const markers: RosmMarker[] = useMemo(() => {
@@ -365,8 +362,6 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
     line,
     center,
     userPos: pos ? ([pos.lat, pos.lon] as [number, number]) : null,
-    userHeading: gpsHeading,
-    mapBearing,
     recenterKey,
     fitPoints,
     hydrating,

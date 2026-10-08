@@ -56,7 +56,12 @@ export async function watchRunPosition(
     );
     if (!already) {
       await Location.startLocationUpdatesAsync(RUN_LOCATION_TASK, {
-        accuracy: Location.Accuracy.BestForNavigation,
+        // Highest, not BestForNavigation: expo-location maps that to iOS's
+        // kCLLocationAccuracyBestForNavigation, which Apple means for a device
+        // on power, and to a 500 ms fused interval on Android. Highest is
+        // kCLLocationAccuracyBest and 1 s; distanceInterval replaces its 25 m
+        // Android default.
+        accuracy: Location.Accuracy.Highest,
         distanceInterval: 5,
         activityType: Location.ActivityType.Fitness,
         pausesUpdatesAutomatically: false,

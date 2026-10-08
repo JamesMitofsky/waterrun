@@ -7,7 +7,7 @@ import { SkipBackIcon } from "phosphor-react-native/src/icons/SkipBack";
 import { SkipForwardIcon } from "phosphor-react-native/src/icons/SkipForward";
 import { XCircleIcon } from "phosphor-react-native/src/icons/XCircle";
 import { DogIcon } from "../components/icons/DogIcon";
-import { fmtDist } from "@rosm/core/geo";
+import { fmtDist, maneuver } from "@rosm/core/geo";
 import { STATUS_COLOR } from "@rosm/core/editStatus";
 import type { StopStatus } from "@rosm/core/stores/run";
 import { useOutbox } from "@rosm/core/stores/outbox";
@@ -38,18 +38,6 @@ const STATUS_LABEL: Record<StopStatus, string> = {
   removed: "Removed",
   skipped: "Skipped",
 };
-
-function maneuver(deg: number): string {
-  const norm = ((deg % 360) + 360) % 360;
-  if (norm < 20 || norm > 340) return "Continue straight";
-  if (norm <= 45) return "Slight right";
-  if (norm <= 135) return "Turn right";
-  if (norm <= 160) return "Sharp right";
-  if (norm <= 200) return "U-turn";
-  if (norm <= 225) return "Sharp left";
-  if (norm <= 315) return "Turn left";
-  return "Slight left";
-}
 
 export default function RunScreen() {
   const s = useRunSession();
@@ -138,7 +126,6 @@ export default function RunScreen() {
     <View className="bg-base flex-1">
       <RosmMap
         center={s.center}
-        bearing={s.mapBearing ?? undefined}
         markers={mapMarkers}
         line={s.line}
         userPos={s.userPos}
