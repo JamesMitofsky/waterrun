@@ -139,6 +139,25 @@ describe("archiveRoute", () => {
     expect(getArchivedRoute("r1")?.plan.index).toBe(2);
   });
 
+  it("lists the run on its next archive when the index write failed", () => {
+    archiveRoute(snap("old"));
+    relaunch({
+      set: (key: string, value: string) => {
+        if (key === INDEX_KEY) throw new Error("disk full");
+        kv.set(key, value);
+      },
+    });
+    archiveRoute(snap("r1"));
+    expect(getArchivedRouteIndex().map((s) => s.routeId)).toEqual(["old"]);
+
+    relaunch();
+    vi.setSystemTime(new Date("2026-07-04T11:00:00Z"));
+    archiveRoute(snap("r1", 1));
+    expect(getArchivedRouteIndex().map((s) => s.routeId)).toEqual(["r1", "old"]);
+    // The first snapshot did land, so the run keeps its original start.
+    expect(getArchivedRoute("r1")?.startedAt).toBe("2026-07-04T10:00:00.000Z");
+  });
+
   it("keeps an active run's pool and drops it once the run is finished", () => {
     const stops = [stop(1, "pending"), stop(2, "pending")];
     archiveRoute({ ...snap("r1", 1, stops), plan: { ...snap("r1", 1, stops).plan, pool: POOL } });
@@ -272,6 +291,27 @@ describe("migration from the single-blob archive", () => {
     relaunch();
     expect(getArchivedRouteIndex().map((s) => s.routeId)).toEqual(["r-new", "r-old"]);
     expect(getArchivedRoute("r-old")).toEqual(older);
+    expect(kv.get(KEY)).toBeNull();
+  });
+
+  it("lists a run that was stored but not yet indexed when the last attempt failed", () => {
+    kv.set(KEY, JSON.stringify([older, newer]));
+    // The newest run's key is written, then the index write fails (the run's
+    // blob took the last free space), which stops the migration there.
+    relaunch({
+      set: (key: string, value: string) => {
+        if (key === INDEX_KEY) throw new Error("disk full");
+        kv.set(key, value);
+      },
+    });
+    expect(getArchivedRouteIndex()).toEqual([]);
+    expect(kv.get(routeKey("r-new"))).not.toBeNull();
+
+    relaunch();
+    expect(getArchivedRouteIndex().map((s) => s.routeId)).toEqual(["r-new", "r-old"]);
+    const { pool: _pool, ...newerPlan } = newer.plan;
+    expect(getArchivedRoute("r-new")).toEqual({ ...newer, plan: newerPlan });
+    expect(getArchivedRoutes().map((r) => r.routeId)).toEqual(["r-new", "r-old"]);
     expect(kv.get(KEY)).toBeNull();
   });
 });

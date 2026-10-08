@@ -135,7 +135,21 @@ function readRoute(kv: KvPort, routeId: string): ArchivedRoute | undefined {
   return isRoute(r) && r.routeId === routeId ? r : undefined;
 }
 
-// Write one route and its summary; returns the updated index.
+// Add or replace one route's summary in the index; returns the updated index.
+function indexRoute(
+  kv: KvPort,
+  stored: ArchivedRoute,
+  index: ArchivedRouteSummary[],
+): ArchivedRouteSummary[] {
+  const next = [...index.filter((s) => s.routeId !== stored.routeId), summarize(stored)];
+  kv.set(INDEX_KEY, JSON.stringify(next));
+  return next;
+}
+
+// Write one route, then its summary; returns the updated index. The route goes
+// first so the index never lists a run that isn't stored. A failure between the
+// two leaves the run stored but unlisted until something lists it again: the
+// run's next archive, or the migration on the next launch.
 function writeRoute(
   kv: KvPort,
   r: ArchivedRoute,
@@ -143,9 +157,7 @@ function writeRoute(
 ): ArchivedRouteSummary[] {
   const stored = forStorage(r);
   kv.set(routeKey(r.routeId), JSON.stringify(stored));
-  const next = [...index.filter((s) => s.routeId !== r.routeId), summarize(stored)];
-  kv.set(INDEX_KEY, JSON.stringify(next));
-  return next;
+  return indexRoute(kv, stored, index);
 }
 
 // Ports already checked for the legacy blob this session (one per configured
@@ -157,10 +169,12 @@ const migrated = new WeakSet<KvPort>();
 // when it lets go of the old blob:
 // - A route that already reads back from the new layout is never overwritten:
 //   if an earlier attempt was interrupted after writing it, the run may have
-//   moved on since.
+//   moved on since. If that attempt stopped before listing it, it is listed
+//   from what was stored.
 // - The legacy key is removed only once every route it held reads back from
-//   the new keys. An entry that can't be migrated (not a route at all) keeps
-//   the legacy key in place, so nothing is ever thrown away unread.
+//   the new keys and is in the index. An entry that can't be migrated (not a
+//   route at all) keeps the legacy key in place, so nothing is ever thrown
+//   away unread.
 function migrateLegacy(kv: KvPort) {
   if (migrated.has(kv)) return;
   migrated.add(kv);
@@ -171,7 +185,9 @@ function migrateLegacy(kv: KvPort) {
     let index = readIndex(kv);
     // Upserts kept one entry per route in the old blob; if not, the newest wins.
     for (const r of [...routes].sort(newestFirst)) {
-      if (!readRoute(kv, r.routeId)) index = writeRoute(kv, r, index);
+      const stored = readRoute(kv, r.routeId);
+      if (!stored) index = writeRoute(kv, r, index);
+      else if (!index.some((s) => s.routeId === r.routeId)) index = indexRoute(kv, stored, index);
     }
     const indexed = new Set(readIndex(kv).map((s) => s.routeId));
     const complete =
