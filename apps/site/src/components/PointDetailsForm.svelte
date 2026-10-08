@@ -63,8 +63,8 @@
     return Object.keys(extras).length ? extras : undefined;
   }
 
-  // Refuse a note the server's EditExtras schema would reject (the note is
-  // the only field it can; a core test pins NOTE_MAX to that limit).
+  // Refuse a note the server's EditExtras schema would reject. The note is the
+  // only field here it can reject, and a core test pins NOTE_MAX to its limit.
   function submit() {
     const cleaned = normalizeNote(note);
     if (cleaned.length > NOTE_MAX) {
