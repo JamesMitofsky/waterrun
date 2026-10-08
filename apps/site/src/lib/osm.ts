@@ -52,14 +52,17 @@ const CREATE_TIMEOUT_MS = 60_000;
 export function safeReturnPath(raw: string, origin: string): string | null {
   // eslint-disable-next-line no-control-regex
   if (!raw.startsWith("/") || /[\u0000-\u001F\\]/.test(raw)) return null;
-  let url: URL;
   try {
-    url = new URL(raw, origin);
+    const url = new URL(raw, origin);
+    if (url.origin !== origin) return null;
+    const path = url.pathname + url.search + url.hash;
+    // Resolving collapses dot segments, which can itself produce a "//host"
+    // path: "/..//evil.com" becomes "//evil.com", another site once a browser
+    // reads it as a Location. So the result has to pass the same test.
+    return new URL(path, origin).origin === origin ? path : null;
   } catch {
     return null;
   }
-  if (url.origin !== origin) return null;
-  return url.pathname + url.search + url.hash;
 }
 
 // ---- PKCE ----

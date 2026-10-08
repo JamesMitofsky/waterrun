@@ -655,6 +655,12 @@ describe("safeReturnPath", () => {
     ["/\t/evil.com"],
     ["/\n/evil.com"],
     ["/\r\n/evil.com"],
+    // Dot segments that collapse into a "//host" path once resolved.
+    ["/..//evil.com"],
+    ["/.//evil.com"],
+    ["/%2e%2e//evil.com"],
+    ["/a/..//evil.com"],
+    ["/..//"],
     ["https://evil.com"],
     ["javascript:alert(1)"],
     [""],
@@ -672,6 +678,13 @@ describe("safeReturnPath", () => {
     expect(safeReturnPath("/public-drinking-fountains?x=1#a", origin)).toBe(
       "/public-drinking-fountains?x=1#a",
     );
+  });
+
+  it("refuses a path that resolving turns into another site", () => {
+    // What the first check alone returned, and where a browser goes from it.
+    expect(new URL("/..//evil.com", origin).pathname).toBe("//evil.com");
+    expect(new URL("//evil.com", origin).origin).toBe("https://evil.com");
+    expect(safeReturnPath("/..//evil.com", origin)).toBeNull();
   });
 
   it("returns the path as the browser would resolve it", () => {
