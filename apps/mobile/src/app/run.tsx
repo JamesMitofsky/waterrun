@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { Redirect, useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { PointSheetHost } from "../components/ui/PointSheetHost";
 import { CheckCircleIcon } from "phosphor-react-native/src/icons/CheckCircle";
 import { SkipBackIcon } from "phosphor-react-native/src/icons/SkipBack";
@@ -51,6 +52,7 @@ function latestEdit(items: OutboxItem[], id: number | string): OutboxItem | unde
 export default function RunScreen() {
   const s = useRunSession();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   const [selectedId, setSelectedId] = useState<number | string | null>(null);
   const [addLocation, setAddLocation] = useState<{ lat: number; lon: number } | null>(null);
@@ -147,7 +149,14 @@ export default function RunScreen() {
         onMarkerPress={onMarkerPress}
         onMapPress={onMapPress}
       />
-      <View className="bg-base border-light/10 absolute right-0 bottom-0 left-0 border-t px-5 pt-5 pb-8">
+      {/* A full-screen stack screen, so the root provider's inset is this
+          screen's: the panel clears the home indicator and Android's 3-button
+          bar (48dp; edge to edge is always on), and keeps at least its own
+          32pt below the last button. */}
+      <View
+        className="bg-base border-light/10 absolute right-0 bottom-0 left-0 border-t px-5 pt-5"
+        style={{ paddingBottom: Math.max(32, insets.bottom + 8) }}
+      >
         {s.done ? (
           <>
             <Text className="text-light text-lg font-bold">Run complete</Text>
