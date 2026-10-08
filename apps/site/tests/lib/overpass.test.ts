@@ -1,4 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { USER_AGENT } from "@rosm/core/identity";
+import { fakeTimeoutSignals, hangingFetch } from "../helpers/upstream";
 
 // The module captures OVERPASS_URL and the mirror list at import time, so load it
 // fresh with a guaranteed-clean env to keep the endpoint order deterministic.
@@ -26,7 +28,7 @@ const errText = (status: number, body = "err") => new Response(body, { status })
 describe("buildQuery", () => {
   it("targets nodes, ways and relations for the tag within a rounded radius", () => {
     const q = mod.buildQuery({ lat: 48.85, lon: 2.35, radiusM: 123.7 }, tag);
-    expect(q).toContain("[out:json][timeout:25];");
+    expect(q).toContain("[out:json][timeout:15];");
     expect(q).toContain('node["amenity"="drinking_water"](around:124,48.85,2.35);');
     expect(q).toContain('way["amenity"="drinking_water"](around:124,48.85,2.35);');
     expect(q).toContain('relation["amenity"="drinking_water"](around:124,48.85,2.35);');
@@ -49,6 +51,26 @@ describe("buildQuery", () => {
     expect(q).not.toContain("abandoned:");
     // 3 element kinds × 2 prefixes.
     expect(q.match(/\(around:/g)).toHaveLength(6);
+  });
+
+  it("escapes quotes and backslashes so a tag can't break out of its string", () => {
+    const q = mod.buildQuery(
+      { lat: 38.9, lon: -77, radiusM: 100 },
+      {
+        key: "amenity",
+        value: 'x"];node(-90,-180,90,180);out;//',
+      },
+    );
+    expect(q).toContain(
+      'node["amenity"="x\\"];node(-90,-180,90,180);out;//"](around:100,38.9,-77);',
+    );
+    expect(mod.qlString('a\\"b')).toBe('"a\\\\\\"b"');
+  });
+
+  it("refuses control characters in a tag", () => {
+    expect(() =>
+      mod.buildQuery({ lat: 0, lon: 0, radiusM: 1 }, { key: "amenity", value: "a\nb" }),
+    ).toThrow();
   });
 });
 
@@ -77,7 +99,7 @@ describe("fetchFountains — element mapping", () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://overpass-api.de/api/interpreter");
     expect(init.method).toBe("POST");
-    expect(init.headers["User-Agent"]).toContain("run-for-maps");
+    expect(init.headers["User-Agent"]).toBe(USER_AGENT);
     const sent = new URLSearchParams(init.body as string).get("data");
     expect(sent).toBe(mod.buildQuery({ lat: 48.85, lon: 2.35, radiusM: 500 }, tag));
   });
@@ -109,7 +131,7 @@ describe("fetchFountains — element mapping", () => {
 });
 
 describe("fetchFountains — retries and mirror fallback", () => {
-  it("falls through to the next mirror after retryable failures", async () => {
+  it("retries a 5xx once on the same mirror, then falls through", async () => {
     vi.useFakeTimers();
     const fetchMock = vi
       .fn()
@@ -156,22 +178,51 @@ describe("fetchFountains — retries and mirror fallback", () => {
     });
     await vi.runAllTimersAsync();
     await assertion;
-    // 2 attempts × 3 mirrors.
+    // One attempt per mirror: a 429 is never asked again on the same host.
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "https://overpass-api.de/api/interpreter",
+      "https://overpass.kumi.systems/api/interpreter",
+      "https://overpass.private.coffee/api/interpreter",
+    ]);
+  });
+
+  it("moves to the next mirror straight after a 429", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(errText(429, "Too Many Requests"))
+      .mockResolvedValueOnce(okJson({ elements: [{ type: "node", id: 8, lat: 1, lon: 1 }] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const fountains = await mod.fetchFountains({ lat: 0, lon: 0, radiusM: 500 }, tag);
+    expect(fountains.map((x) => x.id)).toEqual([8]);
+    expect(fetchMock.mock.calls[1][0]).toBe("https://overpass.kumi.systems/api/interpreter");
+  });
+
+  it("never pauses after a mirror's last attempt", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockImplementation(async () => errText(502));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const p = mod.fetchFountains({ lat: 0, lon: 0, radiusM: 500 }, tag);
+    let settled = false;
+    p.catch(() => {}).finally(() => (settled = true));
+    // One 500 ms pause per mirror, between its two attempts, and none after.
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(settled).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(6);
+    await expect(p).rejects.toMatchObject({ status: 502, retryable: true });
   });
 
   it("maps request timeouts to a took-too-long message", async () => {
     vi.useFakeTimers();
-    const abortErr = Object.assign(new Error("The operation was aborted"), {
-      name: "AbortError",
-    });
-    const fetchMock = vi.fn().mockRejectedValue(abortErr);
-    vi.stubGlobal("fetch", fetchMock);
+    fakeTimeoutSignals();
+    vi.stubGlobal("fetch", hangingFetch());
 
     const p = mod.fetchFountains({ lat: 0, lon: 0, radiusM: 500 }, tag);
     const assertion = expect(p).rejects.toMatchObject({
       retryable: true,
       status: null,
+      timedOut: true,
       message: expect.stringContaining("took too long"),
     });
     await vi.runAllTimersAsync();
@@ -203,5 +254,134 @@ describe("fetchFountains — retries and mirror fallback", () => {
     });
     await vi.runAllTimersAsync();
     await assertion;
+  });
+});
+
+describe("fetchOverpass — deadline and cancellation", () => {
+  const query = "[out:json];node(1);out;";
+
+  it("stays within the deadline when every mirror hangs", async () => {
+    vi.useFakeTimers();
+    fakeTimeoutSignals();
+    const fetchMock = hangingFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const started = Date.now();
+    const p = mod.fetchOverpass(query, { deadlineMs: 25_000 });
+    const assertion = expect(p).rejects.toMatchObject({ timedOut: true, retryable: true });
+    await vi.runAllTimersAsync();
+    await assertion;
+    expect(Date.now() - started).toBeLessThanOrEqual(25_000);
+    // The first mirror gets its full attempt; the second only what is left.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][0]).toBe("https://overpass.kumi.systems/api/interpreter");
+  });
+
+  it("clamps an attempt to a short deadline", async () => {
+    vi.useFakeTimers();
+    fakeTimeoutSignals();
+    const fetchMock = hangingFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const p = mod.fetchOverpass(query, { deadlineMs: 15_000 });
+    let settled = false;
+    p.catch(() => {}).finally(() => (settled = true));
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(settled).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await expect(p).rejects.toMatchObject({ timedOut: true });
+  });
+
+  it("gives each attempt no more than the caller's per-attempt limit", async () => {
+    vi.useFakeTimers();
+    fakeTimeoutSignals();
+    const fetchMock = hangingFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const p = mod.fetchOverpass(query, { deadlineMs: 15_000, attemptTimeoutMs: 7_000 });
+    const assertion = expect(p).rejects.toMatchObject({ timedOut: true });
+    await vi.advanceTimersByTimeAsync(7_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(8_000);
+    await assertion;
+  });
+
+  it("stops trying further mirrors once the caller aborts", async () => {
+    const ctrl = new AbortController();
+    const fetchMock = vi.fn().mockImplementation(async () => {
+      ctrl.abort();
+      return errText(429);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const err = await mod.fetchOverpass(query, { signal: ctrl.signal }).catch((e) => e);
+    expect(err.name).toBe("AbortError");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("makes no request at all for an already aborted caller", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const ctrl = new AbortController();
+    ctrl.abort();
+    await expect(mod.fetchOverpass(query, { signal: ctrl.signal })).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("fetchOverpass — runtime errors reported with a 200", () => {
+  const query = "[out:json];node(1);out;";
+  const timedOutRemark = {
+    elements: [],
+    remark: 'runtime error: Query timed out in "query" at line 3 after 16 seconds.',
+  };
+
+  it("takes a runtime-error remark as a failure and tries the next mirror", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(okJson(timedOutRemark))
+      .mockResolvedValueOnce(okJson({ elements: [{ type: "node", id: 9, lat: 1, lon: 1 }] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const json = await mod.fetchOverpass(query);
+    expect(json.elements.map((e) => e.id)).toEqual([9]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][0]).toBe("https://overpass.kumi.systems/api/interpreter");
+  });
+
+  it("rejects with a retryable error when every mirror reports one", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(async () =>
+        okJson({ elements: [], remark: 'runtime error: Query ran out of memory in "query".' }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const err = await mod.fetchOverpass(query).catch((e) => e);
+    expect(err).toBeInstanceOf(mod.OverpassError);
+    expect(err.retryable).toBe(true);
+    expect(err.message).toContain("busy");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("returns a result that carries a harmless remark", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(okJson({ elements: [{ type: "node", id: 1 }], remark: "note" })),
+    );
+    expect((await mod.fetchOverpass(query)).elements).toHaveLength(1);
+  });
+
+  it("tries the next mirror when a 200 isn't JSON", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("<html>maintenance</html>", { status: 200 }))
+      .mockResolvedValueOnce(okJson({ elements: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect((await mod.fetchOverpass(query)).elements).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
