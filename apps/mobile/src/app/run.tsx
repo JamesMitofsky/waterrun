@@ -13,7 +13,7 @@ import { STATUS_COLOR } from "@rosm/core/editStatus";
 import type { StopStatus } from "@rosm/core/stores/run";
 import { useOutbox, type OutboxItem } from "@rosm/core/stores/outbox";
 import { RosmMap } from "../map/RosmMap";
-import { useRunSession } from "../run/useRunSession";
+import { useRunSession, type RunSession } from "../run/useRunSession";
 import { endRun } from "../run/runLifecycle";
 import { PointSheet, pointEditOf } from "../components/PointSheet";
 import { Button } from "../components/ui/Button";
@@ -50,7 +50,13 @@ function latestEdit(items: OutboxItem[], id: number | string): OutboxItem | unde
 }
 
 export default function RunScreen() {
-  const s = useRunSession();
+  const live = useRunSession();
+  // Finish ends the run at once, resetting the stores this screen reads, but
+  // the router only replaces the screen on its next render. Until then, and
+  // while the summary slides over it, the screen keeps showing the run as it
+  // was instead of an empty map and "Waiting for GPS…".
+  const [ended, setEnded] = useState<RunSession | null>(null);
+  const s = ended ?? live;
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
@@ -76,6 +82,7 @@ export default function RunScreen() {
   // Finishing never waits on the network: the run ends on the device and the
   // summary opens at once; the changeset closes in the background.
   const handleFinish = () => {
+    setEnded(live);
     const routeId = endRun();
     if (routeId) router.replace({ pathname: "/run-detail", params: { id: routeId, fresh: "1" } });
     else router.replace("/plan");
