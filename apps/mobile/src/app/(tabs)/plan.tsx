@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Platform, Text, View } from "react-native";
 import { useIsFocused, useRouter } from "expo-router";
 import { PointSheetHost } from "../../components/ui/PointSheetHost";
 import { usePlanner, inRouteIdsOf, shouldAutoFindPoints } from "@rosm/core/stores/planner";
@@ -20,6 +20,12 @@ import { hapticSelect } from "../../ports/haptics";
 function markLabel(f: Fountain) {
   return f.tags.name ?? "Unnamed fountain";
 }
+
+// Room under the planner panel's last control. On Android expo-router already
+// ends each tab's content above the tab bar (a bottom-edge SafeAreaView), so
+// only the panel's own padding is needed there; on iOS the content runs on
+// under the tab bar and the home indicator.
+const PANEL_BOTTOM = Platform.OS === "android" ? "pb-5" : "pb-28";
 
 // True from the first time this tab is shown. Native tabs render every tab at
 // launch (expo-router has no lazy option), and this one would otherwise start
@@ -201,7 +207,9 @@ function PlanContent() {
 
       {/* Planner controls pinned to the bottom of the screen, full-width,
           matching the active-run panel in run.tsx. */}
-      <View className="bg-surface border-base/10 absolute right-0 bottom-0 left-0 border-t px-5 pt-5 pb-28">
+      <View
+        className={`bg-surface border-base/10 absolute right-0 bottom-0 left-0 border-t px-5 pt-5 ${PANEL_BOTTOM}`}
+      >
         {phase === "run" ? (
           <View className="gap-3">
             <Text className="text-base font-bold">
