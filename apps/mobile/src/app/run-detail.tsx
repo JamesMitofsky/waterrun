@@ -54,7 +54,6 @@ export default function RunDetail() {
           markers={markers}
           line={line}
           fitPoints={fit}
-          recenterKey={route.routeId}
         />
       </View>
       <ScrollView contentContainerClassName="gap-2 p-5">

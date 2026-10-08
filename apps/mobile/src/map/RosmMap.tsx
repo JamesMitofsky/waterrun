@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, type ViewStyle, type NativeSyntheticEvent } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   Camera,
   type CameraRef,
@@ -9,15 +10,18 @@ import {
   Layer,
   Map,
   NativeUserLocation,
+  type ViewPadding,
 } from "@maplibre/maplibre-react-native";
 import { CrosshairSimpleIcon } from "phosphor-react-native/src/icons/CrosshairSimple";
 import type { Feature, FeatureCollection, Point } from "geojson";
+import { FRAME_MARGIN, frameBounds } from "@rosm/core/mapFrame";
 import { OSM_STYLE_JSON } from "./style";
 
 // Layer id for the marker dots.
 const MARKER_LAYER = "marker-dots";
 
-// How long the camera takes to ease to a new center.
+// How long the camera takes to reframe, and to ease to a new center.
+const FRAME_MS = 500;
 const RECENTER_MS = 600;
 
 // Marker data only — screens attach their own action UI on press (Leaflet-style
@@ -53,27 +57,27 @@ export type RosmRegion = {
 };
 
 type Props = {
+  // Where the map opens, and where each new `recenterKey` moves it.
   center: [number, number]; // [lat, lon]
   zoom?: number;
-  bearing?: number;
   markers?: RosmMarker[];
   line?: [number, number][]; // [lat, lon][]
   // The device's own location, drawn natively (a blue dot with a heading cone).
   showUserLocation?: boolean;
-  // Where the location button takes the map.
-  userPos?: [number, number] | null; // [lat, lon]
   onMarkerPress?: (id: RosmMarker["id"]) => void;
   onMapPress?: (lat: number, lon: number) => void;
   // Fires after a user-driven pan/zoom settles (not programmatic camera moves).
   onRegionChange?: (region: RosmRegion) => void;
-  // Position the camera once, then leave it under the user's finger. Without this
-  // the controlled center/zoom re-applies on every render and snaps panning back.
-  initialOnly?: boolean;
-  // With initialOnly: each new key moves the camera to the current
-  // `center`/`zoom`.
+  // The camera is the user's: it opens at `center` and then stays where they
+  // put it. Each new key moves it to the current `center`/`zoom`.
   recenterKey?: string;
   animateRecenter?: boolean;
+  // Keep these points framed, refitting as they change, until the user moves
+  // the map. The location button picks the framing back up.
   fitPoints?: [number, number][]; // [lat, lon][]
+  // Where the framed points go: the part of the map left clear of anything
+  // drawn over it (see core's framePadding). Defaults to a plain margin.
+  framePadding?: ViewPadding;
   showLocationButton?: boolean;
   style?: ViewStyle;
 };
@@ -144,49 +148,60 @@ const MARKER_LAYERS = [
 // coerce it so `f.id === id` comparisons on the caller side still match.
 const resolveId = (raw: string): RosmMarker["id"] => (/^-?\d+$/.test(raw) ? Number(raw) : raw);
 
-// Center on the fit-points centroid at a modest zoom when a bounding set is given,
-// else the explicit center. (A true fitBounds is a later refinement.)
-function resolveView(
-  center: [number, number],
-  zoom: number,
-  fitPoints?: [number, number][],
-): { center: [number, number]; zoom: number } {
-  if (fitPoints && fitPoints.length >= 2) {
-    const lat = fitPoints.reduce((s, p) => s + p[0], 0) / fitPoints.length;
-    const lon = fitPoints.reduce((s, p) => s + p[1], 0) / fitPoints.length;
-    return { center: [lon, lat], zoom: 14 };
-  }
-  return { center: [center[1], center[0]], zoom };
-}
-
 export function RosmMap({
   center,
   zoom = 15,
   markers = [],
   line,
   showUserLocation,
-  userPos,
   onMarkerPress,
   onMapPress,
   onRegionChange,
-  initialOnly,
   recenterKey,
   animateRecenter,
-  showLocationButton,
   fitPoints,
+  framePadding,
+  showLocationButton,
   style,
 }: Props) {
+  const insets = useSafeAreaInsets();
   const cameraRef = useRef<CameraRef>(null);
-  const view = resolveView(center, zoom, fitPoints);
-  const [viewLon, viewLat] = view.center;
-  const viewZoom = view.zoom;
+  const [lat, lon] = center;
+
+  // Serialized here, once per data change. GeoJSONSource stringifies an
+  // object on every render it gets, and this map renders on every GPS fix and
+  // pan settle; handed a string, it passes it through as it is.
+  const markerData = useMemo(() => JSON.stringify(markerFeatures(markers)), [markers]);
+  const lineData = useMemo(
+    () => (line && line.length > 1 ? JSON.stringify(lineFeature(line)) : null),
+    [line],
+  );
+
+  // The framed box, as primitives, so a caller that rebuilds the same points
+  // on each render isn't taken for a change.
+  const frame = fitPoints?.length
+    ? frameBounds(fitPoints.map(([pLat, pLon]) => ({ lat: pLat, lon: pLon })))
+    : null;
+  const [fw, fs, fe, fn] = frame ?? [];
+  const padTop = framePadding?.top ?? FRAME_MARGIN;
+  const padRight = framePadding?.right ?? FRAME_MARGIN;
+  const padBottom = framePadding?.bottom ?? FRAME_MARGIN;
+  const padLeft = framePadding?.left ?? FRAME_MARGIN;
+  const frameKey =
+    fw === undefined ? null : [fw, fs, fe, fn, padTop, padRight, padBottom, padLeft].join();
 
   // Where the map opens. The native camera only exists once the map has first
   // laid out (Map renders it from its onLayout), takes its initial view from
   // its first props and ignores later ones, so this can follow the latest view.
   const initialViewState = useMemo<InitialViewState>(
-    () => ({ center: [viewLon, viewLat], zoom: viewZoom }),
-    [viewLon, viewLat, viewZoom],
+    () =>
+      fw !== undefined
+        ? {
+            bounds: [fw, fs!, fe!, fn!],
+            padding: { top: padTop, right: padRight, bottom: padBottom, left: padLeft },
+          }
+        : { center: [lon, lat], zoom },
+    [fw, fs, fe, fn, padTop, padRight, padBottom, padLeft, lat, lon, zoom],
   );
 
   // A camera move made before the map has loaded can be lost. There is no
@@ -220,25 +235,43 @@ export function RosmMap({
   // its initial view put it.
   const appliedRecenter = useRef(recenterKey);
   useEffect(() => {
-    if (!initialOnly || recenterKey === undefined || recenterKey === appliedRecenter.current) {
-      return;
-    }
+    if (recenterKey === undefined || recenterKey === appliedRecenter.current) return;
     appliedRecenter.current = recenterKey;
     move(
       animateRecenter
-        ? { center: [viewLon, viewLat], zoom: viewZoom, duration: RECENTER_MS, easing: "ease" }
-        : { center: [viewLon, viewLat], zoom: viewZoom, duration: 0, easing: undefined },
+        ? { center: [lon, lat], zoom, duration: RECENTER_MS, easing: "ease" }
+        : { center: [lon, lat], zoom, duration: 0, easing: undefined },
     );
-  }, [initialOnly, recenterKey, animateRecenter, viewLon, viewLat, viewZoom, move]);
+  }, [recenterKey, animateRecenter, lat, lon, zoom, move]);
 
-  // Serialized here, once per data change. GeoJSONSource stringifies an
-  // object on every render it gets, and this map renders on every GPS fix and
-  // pan settle; handed a string, it passes it through as it is.
-  const markerData = useMemo(() => JSON.stringify(markerFeatures(markers)), [markers]);
-  const lineData = useMemo(
-    () => (line && line.length > 1 ? JSON.stringify(lineFeature(line)) : null),
-    [line],
+  // Framing is on until the user moves the map, and back on from the
+  // location button. The frame last applied is remembered, so a render with
+  // the same points and padding (or the frame the map opened on) doesn't
+  // refit.
+  const [framing, setFraming] = useState(true);
+  const appliedFrame = useRef(frameKey);
+  const fit = useCallback(
+    (force: boolean) => {
+      if (frameKey === null || (!force && frameKey === appliedFrame.current)) return;
+      appliedFrame.current = frameKey;
+      move({
+        bounds: [fw!, fs!, fe!, fn!],
+        padding: { top: padTop, right: padRight, bottom: padBottom, left: padLeft },
+        duration: FRAME_MS,
+        easing: "ease",
+      });
+    },
+    [frameKey, fw, fs, fe, fn, padTop, padRight, padBottom, padLeft, move],
   );
+  useEffect(() => {
+    if (framing) fit(false);
+  }, [framing, fit]);
+
+  const followAgain = () => {
+    touched.current = false;
+    setFraming(true);
+    fit(true);
+  };
 
   // Handlers read the latest callbacks through a ref, so each keeps one
   // identity for the life of the map (the marker source's memo depends on it).
@@ -265,10 +298,12 @@ export function RosmMap({
     callbacks.current.onMapPress?.(tapLat, tapLon);
   }, []);
 
-  // The user has moved the map: a move from before the map loaded is no
-  // longer worth replaying over theirs.
+  // The user taking the camera stops framing as the gesture starts, so the
+  // next fix doesn't pull the map out from under their finger.
   const onRegionStart = useCallback((e: NativeSyntheticEvent<RegionEvent>) => {
-    if (e.nativeEvent.userInteraction) touched.current = true;
+    if (!e.nativeEvent.userInteraction) return;
+    touched.current = true;
+    setFraming(false);
   }, []);
 
   const onRegion = useCallback((e: NativeSyntheticEvent<RegionEvent>) => {
@@ -293,11 +328,7 @@ export function RosmMap({
         onDidFinishLoadingMap={onLoaded}
         onDidFailLoadingMap={onLoaded}
       >
-        {initialOnly ? (
-          <Camera ref={cameraRef} initialViewState={initialViewState} />
-        ) : (
-          <Camera ref={cameraRef} center={view.center} zoom={view.zoom} />
-        )}
+        <Camera ref={cameraRef} initialViewState={initialViewState} />
 
         {lineData ? (
           <GeoJSONSource id="route" data={lineData}>
@@ -321,12 +352,12 @@ export function RosmMap({
         ) : null}
       </Map>
 
-      {showLocationButton && userPos ? (
+      {showLocationButton && frameKey !== null ? (
         <Pressable
-          onPress={() => cameraRef.current?.flyTo({ center: [userPos[1], userPos[0]], zoom: 16 })}
+          onPress={followAgain}
           accessibilityRole="button"
-          accessibilityLabel="Go to my location"
-          style={styles.locationButton}
+          accessibilityLabel="Follow my location"
+          style={[styles.locationButton, { top: insets.top + 8 }]}
         >
           <CrosshairSimpleIcon size={22} color="#1d1d1f" weight="bold" />
         </Pressable>
@@ -338,7 +369,6 @@ export function RosmMap({
 const styles = StyleSheet.create({
   locationButton: {
     position: "absolute",
-    top: 60,
     left: 12,
     width: 44,
     height: 44,

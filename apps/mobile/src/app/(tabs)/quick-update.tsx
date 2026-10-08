@@ -181,7 +181,6 @@ export default function QuickUpdate() {
           center={[center.lat, center.lon]}
           markers={markers}
           showUserLocation
-          initialOnly
           onRegionChange={setRegion}
           onMarkerPress={setSelectedId}
         />

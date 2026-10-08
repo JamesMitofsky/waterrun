@@ -310,31 +310,35 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
     return [...dimMarkers, ...stopMarkers, ...addedMarkers];
   }, [stops, index, added, pool]);
 
+  // Where the map opens before there is a fix to frame.
   const center: [number, number] = pos
     ? [pos.lat, pos.lon]
     : target
       ? [target.lat, target.lon]
       : [run.start.lat, run.start.lon];
 
-  const fitPoints: [number, number][] | undefined =
-    pos && target
+  // What the map keeps in view: the runner and the stop they're heading for,
+  // or just the runner once every stop is done. The map refits as these move
+  // (until the user takes the camera), so they change only with a fix or a
+  // new stop.
+  const fitPoints = useMemo((): [number, number][] | undefined => {
+    if (!pos) return undefined;
+    return target
       ? [
           [pos.lat, pos.lon],
           [target.lat, target.lon],
         ]
-      : undefined;
-
-  const recenterKey =
-    (pos ? `${pos.lat.toFixed(4)},${pos.lon.toFixed(4)}` : "t") +
-    (target ? `|${target.lat.toFixed(4)},${target.lon.toFixed(4)}` : "");
+      : [[pos.lat, pos.lon]];
+  }, [pos, target]);
 
   return {
     markers,
     line,
     center,
-    userPos: pos ? ([pos.lat, pos.lon] as [number, number]) : null,
-    recenterKey,
     fitPoints,
+    // A fix has come in, so location is permitted and the map's own puck
+    // (which follows the device by itself) can be shown.
+    located: pos !== null,
     hydrating,
     nothingToResume,
     done,

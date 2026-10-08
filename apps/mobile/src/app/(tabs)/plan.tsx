@@ -157,7 +157,6 @@ export default function Plan() {
         // A start exists once location was granted and fixed, or the user
         // tapped one in; with location denied the puck just has nothing to show.
         showUserLocation={center !== null}
-        initialOnly
         recenterKey={recenterKey}
         animateRecenter={animateRecenter}
         onMapPress={onMapPress}

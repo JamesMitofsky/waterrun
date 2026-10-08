@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View, type LayoutChangeEvent } from "react-native";
 import { Redirect, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { PointSheetHost } from "../components/ui/PointSheetHost";
@@ -10,6 +10,7 @@ import { XCircleIcon } from "phosphor-react-native/src/icons/XCircle";
 import { DogIcon } from "../components/icons/DogIcon";
 import { fmtDist, maneuver } from "@rosm/core/geo";
 import { STATUS_COLOR } from "@rosm/core/editStatus";
+import { framePadding } from "@rosm/core/mapFrame";
 import type { StopStatus } from "@rosm/core/stores/run";
 import { useOutbox, type OutboxItem } from "@rosm/core/stores/outbox";
 import { RosmMap } from "../map/RosmMap";
@@ -72,6 +73,26 @@ export default function RunScreen() {
   };
   const [confirm, setConfirm] = useState<{ i: number; action: "end" } | null>(null);
   const [now, setNow] = useState(() => new Date());
+
+  // The map keeps the runner and their next stop in the part of it the run
+  // panel doesn't cover, so both sizes are measured as they change.
+  const [mapSize, setMapSize] = useState({ width: 0, height: 0 });
+  const [panelHeight, setPanelHeight] = useState(0);
+  const onScreenLayout = (e: LayoutChangeEvent) => {
+    const { width, height } = e.nativeEvent.layout;
+    setMapSize({ width, height });
+  };
+  const onPanelLayout = (e: LayoutChangeEvent) => setPanelHeight(e.nativeEvent.layout.height);
+  const mapPadding = useMemo(
+    () =>
+      framePadding({
+        width: mapSize.width,
+        height: mapSize.height,
+        coverTop: insets.top,
+        coverBottom: panelHeight,
+      }),
+    [mapSize, insets.top, panelHeight],
+  );
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 30000);
@@ -159,17 +180,14 @@ export default function RunScreen() {
   }
 
   return (
-    <View className="bg-base flex-1">
+    <View className="bg-base flex-1" onLayout={onScreenLayout}>
       <RosmMap
         center={s.center}
         markers={mapMarkers}
         line={s.line}
-        // A fix has come in, so location is permitted and the map's own puck
-        // (which follows the device by itself) can be shown.
-        showUserLocation={s.userPos !== null}
-        userPos={s.userPos}
-        recenterKey={s.recenterKey}
+        showUserLocation={s.located}
         fitPoints={s.fitPoints}
+        framePadding={mapPadding}
         showLocationButton
         onMarkerPress={onMarkerPress}
         onMapPress={onMapPress}
@@ -181,6 +199,7 @@ export default function RunScreen() {
       <View
         className="bg-base border-light/10 absolute right-0 bottom-0 left-0 border-t px-5 pt-5"
         style={{ paddingBottom: Math.max(32, insets.bottom + 8) }}
+        onLayout={onPanelLayout}
       >
         {s.done ? (
           <>
