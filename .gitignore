@@ -13,10 +13,6 @@ node_modules/
 # testing
 coverage/
 
-# next.js
-.next/
-out/
-
 # turborepo
 .turbo/
 
@@ -45,9 +41,12 @@ yarn-error.log*
 
 # typescript
 *.tsbuildinfo
-next-env.d.ts
 
-# storybook
+# Output of the retired Next.js app and Storybook. Nothing here generates these
+# any more; they stay ignored so an old checkout's leftovers can't be committed.
+.next/
+out/
+next-env.d.ts
 storybook-static/
 
 # Claude Code worktrees live inside the repo; never commit them

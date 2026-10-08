@@ -1,11 +1,18 @@
 # On-demand preview deploys.
 #
-# Vercel Git auto-deploys are off (vercel.json). To preview a PR, comment
-# `/deploy` on it. This builds the PR head, deploys a Vercel preview, then
-# aliases that deploy to ONE fixed URL (PREVIEW_ALIAS) so the preview link is
-# always the same no matter which PR was deployed. Whichever PR deploys last
-# owns the alias. Only repo owners/members/collaborators can trigger it, so
-# outside contributors can't spend build minutes or leak secrets.
+# Vercel Git auto-deploys are off (apps/site/vercel.json). To preview a PR,
+# comment `/deploy` on it. This builds the PR head, deploys a Vercel preview,
+# then aliases that deploy to ONE fixed URL (PREVIEW_ALIAS) so the preview link
+# is always the same no matter which PR was deployed. Whichever PR deploys last
+# owns the alias.
+#
+# issue_comment runs with this repo's secrets, so there are two gates: the
+# commenter must be a repo owner/member/collaborator (so outside contributors
+# can't spend build minutes), AND the PR head must be a branch of this repo.
+# The second gate is the one that protects secrets: the build runs the PR's
+# own code (pnpm lifecycle scripts, astro.config.mjs, Vite plugins) with the
+# Vercel token in reach, so a trusted commenter on a fork PR would otherwise
+# hand that token to whoever wrote the fork.
 #
 # Requires repo secrets: VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID.
 # Optional repo variable PREVIEW_ALIAS overrides the fixed preview domain.
@@ -21,46 +28,73 @@ permissions:
   pull-requests: write
 
 jobs:
-  preview:
-    name: Preview Deploy
+  # Runs no PR code and holds no Vercel secrets: it decides whether the preview
+  # job may build this PR, and pins the commit it will build.
+  authorize:
+    name: Authorize
     runs-on: ubuntu-latest
-    # Gate on: comment is on a PR, starts with `/deploy`, and the commenter is
-    # trusted (author of a fork PR is COLLABORATOR only if actually granted).
+    # Gate 1: the comment is on a PR, starts with `/deploy`, and the COMMENTER
+    # is trusted. This says nothing about who wrote the PR's code.
     if: >
       github.event.issue.pull_request &&
       startsWith(github.event.comment.body, '/deploy') &&
       contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
+    outputs:
+      sha: ${{ steps.head.outputs.sha }}
+    steps:
+      # Gate 2: only branches of this repo, i.e. code pushed by someone with
+      # write access. A PR from a since-deleted fork has no head repo and is
+      # refused too.
+      - name: Resolve PR head (branches of this repo only)
+        id: head
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          pr_json=$(gh api "repos/$REPO/pulls/$PR")
+          head_repo=$(jq -r '.head.repo.full_name // ""' <<<"$pr_json")
+          if [ "$head_repo" != "$REPO" ]; then
+            gh pr comment "$PR" --repo "$REPO" --body "🚫 Previews are only available for branches in this repository, not forks."
+            echo "::error::PR head is in '${head_repo:-a deleted repository}', not $REPO"
+            exit 1
+          fi
+          echo "sha=$(jq -r '.head.sha' <<<"$pr_json")" >> "$GITHUB_OUTPUT"
+
+      - name: Acknowledge request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: gh pr comment "$PR" --repo "$REPO" --body "🚀 Building a preview deploy for this PR…"
+
+  preview:
+    name: Preview Deploy
+    needs: authorize
+    runs-on: ubuntu-latest
     # Single shared preview URL, so serialize all /deploy runs. A newer /deploy
     # cancels an in-flight one; last one to finish owns the alias.
     concurrency:
       group: preview-shared
       cancel-in-progress: true
+    # Credentials are added per step below, only where a step needs them.
     env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      # Exact Vercel CLI, bumped on purpose and kept in step with ci.yml: a bare
+      # `pnpm dlx vercel` runs whatever was published last, so a breaking
+      # release could fail deploys with no change in this repo.
+      VERCEL_CLI: vercel@59.26.0
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       # Fixed URL every preview is aliased to. Override with repo variable PREVIEW_ALIAS.
       PREVIEW_ALIAS: ${{ vars.PREVIEW_ALIAS || 'run-for-maps-preview.vercel.app' }}
     steps:
-      - name: Acknowledge request
-        run: |
-          gh pr comment "$PR" --repo "$REPO" --body "🚀 Building a preview deploy for this PR…"
-        env:
-          PR: ${{ github.event.issue.number }}
-          REPO: ${{ github.repository }}
-
-      # Resolve and check out the PR head commit (the code being reviewed).
-      - name: Resolve PR head SHA
-        id: pr
-        run: echo "sha=$(gh pr view "$PR" --repo "$REPO" --json headRefOid -q .headRefOid)" >> "$GITHUB_OUTPUT"
-        env:
-          PR: ${{ github.event.issue.number }}
-          REPO: ${{ github.repository }}
-
+      # The commit authorize resolved, not whatever the branch points at by now.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ steps.pr.outputs.sha }}
+          ref: ${{ needs.authorize.outputs.sha }}
+          # Keep GITHUB_TOKEN out of .git/config, where the PR's build code
+          # could read it.
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v4
 
@@ -70,36 +104,45 @@ jobs:
           cache: pnpm
 
       - name: Pull Vercel preview env
-        run: pnpm dlx vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: pnpm dlx "$VERCEL_CLI" pull --yes --environment=preview --token="$VERCEL_TOKEN"
 
       - name: Build with Vercel
-        run: pnpm dlx vercel build --token="$VERCEL_TOKEN"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: pnpm dlx "$VERCEL_CLI" build --token="$VERCEL_TOKEN"
 
       - name: Deploy prebuilt output (preview)
         id: deploy
-        run: echo "url=$(pnpm dlx vercel deploy --prebuilt --token="$VERCEL_TOKEN")" >> "$GITHUB_OUTPUT"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: echo "url=$(pnpm dlx "$VERCEL_CLI" deploy --prebuilt --token="$VERCEL_TOKEN")" >> "$GITHUB_OUTPUT"
 
       # Point the fixed preview URL at this deploy. The ephemeral deploy URL
       # changes every run; the alias does not.
       - name: Alias to fixed preview URL
-        run: pnpm dlx vercel alias set "$URL" "$PREVIEW_ALIAS" --token="$VERCEL_TOKEN"
         env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           URL: ${{ steps.deploy.outputs.url }}
+        run: pnpm dlx "$VERCEL_CLI" alias set "$URL" "$PREVIEW_ALIAS" --token="$VERCEL_TOKEN"
 
       - name: Post preview URL
-        run: |
-          gh pr comment "$PR" --repo "$REPO" --body "✅ Preview ready: https://$ALIAS (commit \`${SHA:0:7}\`)"
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.issue.number }}
           REPO: ${{ github.repository }}
           ALIAS: ${{ env.PREVIEW_ALIAS }}
-          SHA: ${{ steps.pr.outputs.sha }}
+          SHA: ${{ needs.authorize.outputs.sha }}
+        run: |
+          gh pr comment "$PR" --repo "$REPO" --body "✅ Preview ready: https://$ALIAS (commit \`${SHA:0:7}\`)"
 
       - name: Report failure
         if: failure()
-        run: |
-          gh pr comment "$PR" --repo "$REPO" --body "❌ Preview deploy failed. See the [run log]($RUN)."
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.issue.number }}
           REPO: ${{ github.repository }}
           RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh pr comment "$PR" --repo "$REPO" --body "❌ Preview deploy failed. See the [run log]($RUN)."
