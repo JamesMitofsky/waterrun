@@ -7,7 +7,7 @@ import { TrashIcon } from "phosphor-react-native/src/icons/Trash";
 import { WarningIcon } from "phosphor-react-native/src/icons/Warning";
 import { DogIcon } from "./icons/DogIcon";
 import type { EditAction, EditExtras, Fountain } from "@rosm/core/schemas";
-import type { SyncState } from "@rosm/core/stores/outbox";
+import { useOutbox, type OutboxItem, type SyncState } from "@rosm/core/stores/outbox";
 import { PointDetailsForm } from "./PointDetailsForm";
 
 export type SurveyAction = EditAction | "broken";
@@ -15,9 +15,22 @@ export type SurveyAction = EditAction | "broken";
 export type PointEdit = {
   status: SurveyAction;
   syncState: SyncState;
+  // Why the last send failed. On a pending edit: it will be resent by itself.
+  error?: string;
   changesetUrl?: string;
   extras?: EditExtras;
 };
+
+// What the sheet shows for a queued edit.
+export function pointEditOf(item: OutboxItem): PointEdit {
+  return {
+    status: item.action,
+    syncState: item.syncState,
+    error: item.error,
+    changesetUrl: item.changesetUrl,
+    extras: item.extras,
+  };
+}
 
 const STATUS_LABEL: Record<SurveyAction, string> = {
   confirm: "Confirmed working",
@@ -26,12 +39,21 @@ const STATUS_LABEL: Record<SurveyAction, string> = {
   removed: "Marked removed",
 };
 
-const SYNC_LABEL: Record<SyncState, string> = {
-  pending: "Saved on device",
-  sending: "Syncing…",
-  sent: "Synced",
-  failed: "Sync failed — will retry",
-};
+// Where the edit is on its way to OSM (see SyncState). A pending edit with an
+// error has been tried and the outbox will resend it by itself; a failed one
+// it won't, so that one gets a Retry.
+function syncLabel(edit: PointEdit): string {
+  switch (edit.syncState) {
+    case "pending":
+      return edit.error ? "Waiting to send" : "Saved on device";
+    case "sending":
+      return "Syncing…";
+    case "sent":
+      return "Synced";
+    case "failed":
+      return "Couldn't sync";
+  }
+}
 
 function isDogWater(tags: Record<string, string>): boolean {
   return tags.drinking_water === "no";
@@ -172,7 +194,20 @@ export function PointSheet({ fountain, edit, onAction, inRoute, onToggleRoute }:
           {edit.extras?.note ? (
             <Text className="text-base text-xs font-medium italic">“{edit.extras.note}”</Text>
           ) : null}
-          <Text className="text-muted mt-0.5 text-xs font-bold">{SYNC_LABEL[edit.syncState]}</Text>
+          <View className="mt-0.5 flex-row items-center gap-3">
+            <Text className="text-muted text-xs font-bold">{syncLabel(edit)}</Text>
+            {edit.syncState === "failed" ? (
+              <Pressable
+                onPress={() => void useOutbox.getState().retryAll()}
+                accessibilityRole="button"
+                accessibilityLabel="Retry sending"
+                // A 16pt line of text; the slop makes it a 44pt target.
+                hitSlop={14}
+              >
+                <Text className="text-base text-xs font-bold underline">Retry</Text>
+              </Pressable>
+            ) : null}
+          </View>
           {edit.changesetUrl ? (
             <Pressable
               onPress={() => Linking.openURL(edit.changesetUrl!)}

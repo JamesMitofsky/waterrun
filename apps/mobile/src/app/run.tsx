@@ -10,11 +10,11 @@ import { DogIcon } from "../components/icons/DogIcon";
 import { fmtDist, maneuver } from "@rosm/core/geo";
 import { STATUS_COLOR } from "@rosm/core/editStatus";
 import type { StopStatus } from "@rosm/core/stores/run";
-import { useOutbox } from "@rosm/core/stores/outbox";
+import { useOutbox, type OutboxItem } from "@rosm/core/stores/outbox";
 import { RosmMap } from "../map/RosmMap";
 import { useRunSession } from "../run/useRunSession";
 import { endRun } from "../run/runLifecycle";
-import { PointSheet } from "../components/PointSheet";
+import { PointSheet, pointEditOf } from "../components/PointSheet";
 import { Button } from "../components/ui/Button";
 
 function checkedAgoLabel(tags?: Record<string, string>, now: Date = new Date()): string {
@@ -39,6 +39,14 @@ const STATUS_LABEL: Record<StopStatus, string> = {
   removed: "Removed",
   skipped: "Skipped",
 };
+
+// A point's latest queued edit: a later survey of it supersedes the earlier.
+function latestEdit(items: OutboxItem[], id: number | string): OutboxItem | undefined {
+  for (let i = items.length - 1; i >= 0; i--) {
+    if (String(items[i].nodeId) === String(id)) return items[i];
+  }
+  return undefined;
+}
 
 export default function RunScreen() {
   const s = useRunSession();
@@ -89,19 +97,16 @@ export default function RunScreen() {
     );
   }, [selectedId, s.stops, s.added, s.pool]);
 
-  const selectedEdit = useMemo(() => {
-    if (selectedId == null) return undefined;
-    const items = useOutbox.getState().items;
-    const it = items.find((x) => String(x.nodeId) === String(selectedId));
-    if (!it) return undefined;
-    return {
-      status: it.action,
-      summary: it.summary,
-      syncState: it.syncState,
-      changesetUrl: it.changesetUrl,
-      extras: it.extras,
-    };
-  }, [selectedId]);
+  // The tapped point's latest queued edit, followed while the sheet is open so
+  // its sync state (and a Retry) stays current. Only a change to that edit
+  // re-renders the screen.
+  const selectedItem = useOutbox((o) =>
+    selectedId == null ? undefined : latestEdit(o.items, selectedId),
+  );
+  const selectedEdit = useMemo(
+    () => (selectedItem ? pointEditOf(selectedItem) : undefined),
+    [selectedItem],
+  );
 
   const mapMarkers = useMemo(() => {
     if (!addLocation) return s.markers;
