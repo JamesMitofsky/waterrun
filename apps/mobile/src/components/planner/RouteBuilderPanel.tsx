@@ -33,9 +33,13 @@ export function RouteBuilderPanel({ onStartRun }: { onStartRun: () => void }) {
 
   return (
     <View className="gap-3">
+      {/* With no start yet (location denied, or no fix so far), a tap on the
+          map sets one. */}
       <View className="flex-row items-center gap-2">
         <Text className="text-base text-lg font-bold">
-          Tap fountains to add/remove them from your route
+          {p.center
+            ? "Tap fountains to add/remove them from your route"
+            : "Tap the map to set your start"}
         </Text>
       </View>
 
