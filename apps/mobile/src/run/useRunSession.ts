@@ -7,10 +7,11 @@ import {
   ARRIVAL_RADIUS_M,
   PROXIMITY_RADIUS_M,
 } from "@rosm/core/guidance";
-import { compass, fmtDist, type Pt } from "@rosm/core/geo";
+import { compass, type Pt } from "@rosm/core/geo";
 import { ptLabel } from "@rosm/core/pointTypes";
 import { STATUS_COLOR } from "@rosm/core/editStatus";
 import { archiveRoute, getArchivedRoutes } from "@rosm/core/routeArchive";
+import { progressLine } from "@rosm/core/runProgress";
 import type { EditAction, EditExtras, Fountain } from "@rosm/core/schemas";
 import type { SurveyAction } from "../components/PointSheet";
 import { api } from "../ports/api";
@@ -25,7 +26,8 @@ import {
   ensureNotifyPermission,
   notifyProximity,
   notifyRunComplete,
-  updateLiveActivityNotification,
+  showRunProgress,
+  endRunProgress,
 } from "../ports/notify";
 import type { RosmMarker } from "../map/RosmMap";
 
@@ -124,16 +126,30 @@ export function useRunSession({ enabled = true }: { enabled?: boolean } = {}) {
     }
   }, [enabled, target, distToTarget, index]);
 
-  // Update Live Activity lock screen state with distance to next fountain & turn maneuvers
+  // The lock-screen progress line. Handed every fix; the notifier decides
+  // whether it's worth a post. Taken down once every stop is done, and when the
+  // run leaves the screen.
   useEffect(() => {
-    if (!enabled || !target || distToTarget == null) return;
-    const name = target.tags?.name || `Stop #${index + 1}`;
-    const turnText =
-      nextTurn && distToTurn
-        ? `${nextTurn.angle < 180 ? "Right" : "Left"} in ${fmtDist(distToTurn)}`
-        : undefined;
-    updateLiveActivityNotification(name, distToTarget, turnText);
+    if (!enabled) return;
+    if (!target) {
+      endRunProgress();
+      return;
+    }
+    if (distToTarget == null) return;
+    showRunProgress(
+      progressLine({
+        stopKey: `${index}:${target.id}`,
+        stopName: target.tags?.name || `Stop #${index + 1}`,
+        distToStopM: distToTarget,
+        nextTurn,
+        distToTurnM: distToTurn,
+      }),
+    );
   }, [enabled, target, distToTarget, index, nextTurn, distToTurn]);
+  useEffect(() => {
+    if (!enabled) return;
+    return () => endRunProgress();
+  }, [enabled]);
 
   const notifiedDoneRef = useRef(false);
   useEffect(() => {
