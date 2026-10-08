@@ -15,6 +15,9 @@ const config: ExpoConfig = {
   ios: {
     supportsTablet: false,
     bundleIdentifier: cfg.appId,
+    // Written into the Xcode project as DEVELOPMENT_TEAM so local archives
+    // (scripts/build-ipa.sh) sign automatically against this team.
+    appleTeamId: "4328AG5SK7",
     infoPlist: {
       ITSAppUsesNonExemptEncryption: false,
       // Background location so a run keeps tracking with the screen locked.

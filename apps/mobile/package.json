@@ -11,6 +11,7 @@
     "ios:device:release-build": "expo run:ios --device --configuration Release --no-bundler",
     "ios:preview-build:local": "eas build --profile preview --platform ios --local",
     "ios:prod-build:testflight": "eas build --profile production --platform ios --local --output ./build/water-run.ipa",
+    "ios:prod-build:xcode": "./scripts/build-ipa.sh",
     "ios:testflight:submit": "./scripts/submit-testflight.sh",
     "uniwind:types": "uniwind generate-artifacts --css ./src/global.css --dts ./src/uniwind-types.d.ts",
     "typecheck": "pnpm uniwind:types && tsc --noEmit",
