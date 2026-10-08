@@ -1,6 +1,19 @@
-// The native app's OSM sign-in token: which keychain entry holds it. The OAuth
-// dance itself runs server-side; the app only keeps the bearer token it gets.
+// The native app's OSM sign-in: the link the token comes back on, and which
+// keychain entry holds it. The OAuth dance itself runs server-side; the app
+// only keeps the bearer token it gets.
 import cfg from "../appConfig.json";
+
+// The server hands the token back on <scheme>://osm-callback?token=… (the
+// site's /api/osm/callback builds it from the same scheme).
+export const NATIVE_AUTH_CALLBACK = "osm-callback";
+
+// Whether a URL the app was opened with is that callback, in any of the forms
+// the router may see it: rosm://osm-callback?…, rosm:///osm-callback, or a
+// bare /osm-callback path.
+export function isNativeAuthCallback(url: string): boolean {
+  const rest = url.replace(/^[a-z][a-z0-9+.-]*:/i, "").replace(/^\/+/, "");
+  return rest.split(/[/?#]/, 1)[0] === NATIVE_AUTH_CALLBACK;
+}
 
 // The API host that builds released before the move to waterrun.app called,
 // and so the host their keychain entry for the token is named after.

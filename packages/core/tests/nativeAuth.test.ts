@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   forgetStoredToken,
+  isNativeAuthCallback,
   legacyTokenKey,
   readStoredToken,
   tokenKeyFor,
@@ -124,5 +125,24 @@ describe("forgetStoredToken", () => {
     const { store } = keychain({ [PROD_KEY]: "new" }, { remove: true });
     await expect(forgetStoredToken(store, PROD)).rejects.toThrow("keychain busy");
     expect(store.remove.mock.calls.map(([k]) => k)).toEqual([PROD_KEY, LEGACY_KEY]);
+  });
+});
+
+describe("isNativeAuthCallback", () => {
+  it("recognizes the sign-in callback in each form the router may see", () => {
+    expect(isNativeAuthCallback("rosm://osm-callback?token=abc")).toBe(true);
+    expect(isNativeAuthCallback("rosm://osm-callback")).toBe(true);
+    expect(isNativeAuthCallback("rosm://osm-callback/?token=abc")).toBe(true);
+    expect(isNativeAuthCallback("rosm:///osm-callback?error=denied")).toBe(true);
+    expect(isNativeAuthCallback("/osm-callback?token=abc")).toBe(true);
+  });
+
+  it("leaves every other link to the router", () => {
+    expect(isNativeAuthCallback("rosm://run")).toBe(false);
+    expect(isNativeAuthCallback("/plan")).toBe(false);
+    expect(isNativeAuthCallback("rosm://osm-callbacks")).toBe(false);
+    expect(isNativeAuthCallback("rosm://plan?next=osm-callback")).toBe(false);
+    expect(isNativeAuthCallback("https://waterrun.app/osm-callback")).toBe(false);
+    expect(isNativeAuthCallback("exp+rosm://expo-development-client/?url=x")).toBe(false);
   });
 });
