@@ -10,11 +10,16 @@ const config: ExpoConfig = {
   version: "1.0.0",
   scheme: cfg.scheme, // registers waterrun:// for the OSM OAuth deep-link callback
   orientation: "portrait",
+  // icon.png and splash-icon.png are generated with the site's favicons from one
+  // master: `pnpm --filter @water-run/site brand:icons`. Don't edit them by hand.
   icon: "./assets/icon.png",
   userInterfaceStyle: "light",
   ios: {
     supportsTablet: false,
     bundleIdentifier: cfg.appId,
+    // Written into the Xcode project as DEVELOPMENT_TEAM so local archives
+    // (scripts/build-ipa.sh) sign automatically against this team.
+    appleTeamId: "4328AG5SK7",
     infoPlist: {
       ITSAppUsesNonExemptEncryption: false,
       // Background location so a run keeps tracking with the screen locked.
@@ -53,8 +58,19 @@ const config: ExpoConfig = {
     [
       "expo-splash-screen",
       {
+        // The icon's own tile colour, so launch reads as the icon opening up.
+        backgroundColor: cfg.iconBackground,
         image: "./assets/splash-icon.png",
         imageWidth: 180,
+      },
+    ],
+    [
+      "expo-build-properties",
+      {
+        // Apps built with the iOS 27 SDK (Xcode 27) are killed at launch unless they
+        // adopt the UIScene life cycle. SDK 57 makes it opt-in; SDK 58+ does it by
+        // default, so drop this on upgrade. https://github.com/expo/expo/issues/46664
+        ios: { enableSceneSupport: true },
       },
     ],
   ],

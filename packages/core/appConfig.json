@@ -7,6 +7,7 @@
   "appStoreUrl": "",
   "nativeBackground": "#0c0d0a",
   "pwaThemeColor": "#f4f6f8",
+  "iconBackground": "#f7f2e8",
   "colors": {
     "base": "#0c0d0a",
     "muted": "#4d5c6a",

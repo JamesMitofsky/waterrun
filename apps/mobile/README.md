@@ -81,5 +81,14 @@ eas build --profile production --platform ios
 eas submit --profile production --platform ios
 ```
 
+### Local Xcode build (no EAS)
+
+`pnpm --filter @water-run/mobile ios:prod-build:xcode` runs
+[`scripts/build-ipa.sh`](./scripts/build-ipa.sh): it re-prebuilds `ios/`, archives with
+Xcode automatic signing (team = `ios.appleTeamId`, using the Apple account signed in to
+Xcode), and writes `build/water-run-<version>-<build>.ipa` for Transporter or
+`ios:testflight:submit`. Prefix with `UPLOAD=1` to also upload it to App Store Connect;
+the app record for the bundle ID must exist first.
+
 App Privacy: location (when-in-use + background, "app functionality", not linked to
 identity, no tracking); local notifications only.
