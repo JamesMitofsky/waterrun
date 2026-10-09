@@ -44,13 +44,14 @@ describe("buildQuery", () => {
     expect(q).not.toContain("around:");
   });
 
-  it("adds the disused selector when includeDisused is set, but never abandoned/removed", () => {
+  it("adds the disused and abandoned selectors when includeDisused is set", () => {
     const q = mod.buildQuery({ lat: 48.85, lon: 2.35, radiusM: 500 }, tag, true);
     expect(q).toContain('node["disused:amenity"="drinking_water"]');
-    // Removed points (abandoned:) are never surfaced, so they're never fetched.
-    expect(q).not.toContain("abandoned:");
-    // 3 element kinds × 2 prefixes.
-    expect(q.match(/\(around:/g)).toHaveLength(6);
+    expect(q).toContain('node["abandoned:amenity"="drinking_water"]');
+    expect(q).toContain('way["abandoned:amenity"="drinking_water"]');
+    expect(q).toContain('relation["abandoned:amenity"="drinking_water"]');
+    // 3 element kinds × 3 prefixes.
+    expect(q.match(/\(around:/g)).toHaveLength(9);
   });
 
   it("escapes quotes and backslashes so a tag can't break out of its string", () => {
