@@ -46,6 +46,32 @@ export function boundsRadiusM(bounds: Bounds): number {
   return haversine(c, { lat: n, lon: e });
 }
 
+// Whether a viewport shows ground a circular search (`radiusM` around
+// `center`) didn't reach. The circle is convex, so the view lies inside it
+// exactly when its four corners do. A corner may overshoot the circle by
+// `slack` of the view's own radius (center to corner) before it counts, so
+// a view framed right on the search's edge doesn't trip on every small
+// settle. Scaling that by the view, not the search, keeps the unsearched
+// sliver it lets through a fixed share of the screen at any zoom: zoomed in,
+// the view must stay just as nearly inside the search as it is zoomed out.
+// Zooming in on a searched area never leaves it; panning or zooming out
+// past its edge does.
+export function viewLeavesSearch(
+  bounds: Bounds,
+  search: { center: Pt; radiusM: number },
+  slack: number,
+): boolean {
+  const [w, s, e, n] = bounds;
+  const reach = search.radiusM + slack * boundsRadiusM(bounds);
+  const corners: Pt[] = [
+    { lat: s, lon: w },
+    { lat: s, lon: e },
+    { lat: n, lon: w },
+    { lat: n, lon: e },
+  ];
+  return corners.some((c) => haversine(search.center, c) > reach);
+}
+
 export function metersToFeet(m: number): number {
   return m * 3.28084;
 }

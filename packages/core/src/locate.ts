@@ -57,7 +57,7 @@ export function locateFast(
 
 // Whether a fresh fix should redo the search made around a recent one. Only
 // when it moved far enough to change what is found (`fraction` of the search
-// radius, the rule the map's own "Search this area" uses), and only while the
+// radius), and only while the
 // user hasn't taken the map over: a pan, a zoom or an open point means they
 // are already using the results, and a new search would pull them away.
 export function shouldRefineSearch(o: {

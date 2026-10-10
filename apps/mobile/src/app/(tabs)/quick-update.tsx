@@ -14,10 +14,10 @@ import type { Fountain, EditExtras } from "@water-run/core/schemas";
 import type { StopStatus } from "@water-run/core/stores/run";
 import {
   milesToMeters,
-  haversine,
   boundsCenter,
   boundsRadiusM,
   MAX_SEARCH_RADIUS_M,
+  viewLeavesSearch,
   type Pt,
 } from "@water-run/core/geo";
 import { callApi, postJson } from "@water-run/core/apiCall";
@@ -44,10 +44,13 @@ const RADIUS_M = milesToMeters(RADIUS_MI);
 // the server's own upstream limits, as the planner's point search is: a search
 // may fall back across Overpass mirrors.
 const SEARCH_TIMEOUT_MS = 90_000;
-// The map must drift this far past the last search (as a fraction of that
-// search's radius) before "Search this area" appears — stops it flickering on
-// every idle settle.
+// How far a fresh fix must land from the one searched around (as a fraction
+// of the search's radius) before the search is redone (see shouldRefineSearch).
 const REQUERY_FRACTION = 0.3;
+// How far the view's corners may reach past the last search (as a fraction of
+// the view's own radius) before "Search this area" appears — stops it
+// flickering on every idle settle of a view framed on the search's edge.
+const VIEW_SLACK = 0.3;
 // Where the map opens before there has ever been a search to open on: the
 // whole world, as the planner tab shows before its first fix.
 const WORLD_CENTER: [number, number] = [20, 0];
@@ -57,16 +60,6 @@ type Search = { center: Pt; radiusM: number };
 // A search as asked for. Only one made from a location fix is where the map
 // opens next time (see nearbyView): a "Search this area" can be anywhere.
 type SearchRequest = Search & { fromFix: boolean };
-
-// True once the viewport has panned/zoomed far enough from the last search that
-// re-querying would surface different fountains.
-function movedEnough(region: MapRegion, last: Search): boolean {
-  const c = boundsCenter(region.bounds);
-  const r = Math.min(boundsRadiusM(region.bounds), MAX_SEARCH_RADIUS_M);
-  const panned = haversine(c, last.center) > last.radiusM * REQUERY_FRACTION;
-  const resized = Math.abs(r - last.radiusM) > last.radiusM * REQUERY_FRACTION;
-  return panned || resized;
-}
 
 // A map from the first frame → locate → show the fountains within a mile → tap one
 // → record its state to OSM (offline-first via the outbox). Pan/zoom the map, then
@@ -239,15 +232,17 @@ export default function QuickUpdate() {
     );
   }, [search, moveTo]);
 
-  // Offer a re-query only once the map has moved meaningfully from the results.
-  // With no results yet, once locating has settled (failed, or found the user
+  // Offer a re-query only once the map shows ground the last search didn't
+  // cover: panned or zoomed out past its edge. Zooming in on the results
+  // never offers it, as there is nothing new under the view to find. With no
+  // results yet, once locating has settled (failed, or found the user
   // but the search from there failed), any move offers it: the tab stays usable
   // without location or a first search. Not while still locating, though, as
   // the first fix's own search would then replace what the user searched.
   const canRequery =
     !busy &&
     region != null &&
-    (lastSearch ? movedEnough(region, lastSearch) : locate !== "locating");
+    (lastSearch ? viewLeavesSearch(region.bounds, lastSearch, VIEW_SLACK) : locate !== "locating");
   // A view whose corners lie past the server's limit can't be searched whole,
   // and searching only its middle would read as an empty area: it is offered
   // as a hint to zoom in instead.
