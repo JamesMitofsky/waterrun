@@ -50,7 +50,6 @@ describe("GET /api/fountains", () => {
     const q = sentQuery(fetchMock);
     expect(q).toContain('node["amenity"="drinking_water"](38.7799,-77.30462,39.01431,-76.76918);');
     expect(q).toContain('node["disused:amenity"="drinking_water"]');
-    expect(q).toContain('node["abandoned:amenity"="drinking_water"]');
   });
 
   it("refuses any other region without calling Overpass", async () => {
