@@ -18,6 +18,7 @@ import {
   toDeg,
   toRad,
   turnSide,
+  viewLeavesSearch,
   type Pt,
 } from "../src/geo";
 
@@ -111,6 +112,57 @@ describe("boundsRadiusM", () => {
 
   it("is zero for a degenerate point bounds", () => {
     expect(boundsRadiusM([3, 49, 3, 49])).toBe(0);
+  });
+});
+
+describe("viewLeavesSearch", () => {
+  // A square view centered on `c`, `half` degrees to each side. At the equator
+  // its corners lie `half * √2` degrees out.
+  const view = (c: Pt, half: number): [number, number, number, number] => [
+    c.lon - half,
+    c.lat - half,
+    c.lon + half,
+    c.lat + half,
+  ];
+  const origin: Pt = { lat: 0, lon: 0 };
+  // The search a view of half 0.01° framed on `origin` makes (center to corner).
+  const search = { center: origin, radiusM: boundsRadiusM(view(origin, 0.01)) };
+
+  it("stays inside the search it was framed on", () => {
+    expect(viewLeavesSearch(view(origin, 0.01), search, 0.3)).toBe(false);
+  });
+
+  it("never leaves when zooming in on the searched area", () => {
+    for (const half of [0.008, 0.005, 0.001, 0.0001]) {
+      expect(viewLeavesSearch(view(origin, half), search, 0.3)).toBe(false);
+    }
+  });
+
+  it("never leaves when zoomed in near the search's edge, still inside it", () => {
+    // Centered 0.85 of the radius out along the diagonal, a view of 0.001°
+    // reaches 0.95 of it.
+    expect(viewLeavesSearch(view({ lat: 0.0085, lon: 0.0085 }, 0.001), search, 0.3)).toBe(false);
+  });
+
+  it("leaves once zoomed out past the slack", () => {
+    expect(viewLeavesSearch(view(origin, 0.012), search, 0.3)).toBe(false);
+    expect(viewLeavesSearch(view(origin, 0.015), search, 0.3)).toBe(true);
+  });
+
+  it("leaves once panned past the slack", () => {
+    expect(viewLeavesSearch(view({ lat: 0, lon: 0.002 }, 0.01), search, 0.3)).toBe(false);
+    expect(viewLeavesSearch(view({ lat: 0, lon: 0.006 }, 0.01), search, 0.3)).toBe(true);
+  });
+
+  it("scales the slack to the view, so a zoomed-in view can't drift off the search", () => {
+    // Centered right on the edge, so half the view lies past it, yet its far
+    // corner reaches only 1.1 radii: within a slack of 0.3 of the search's
+    // radius, but well past 0.3 of the view's.
+    expect(viewLeavesSearch(view({ lat: 0.01, lon: 0.01 }, 0.001), search, 0.3)).toBe(true);
+  });
+
+  it("leaves at once with no slack when any corner overshoots", () => {
+    expect(viewLeavesSearch(view({ lat: 0, lon: 0.0001 }, 0.01), search, 0)).toBe(true);
   });
 });
 
