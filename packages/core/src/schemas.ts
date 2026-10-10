@@ -64,9 +64,10 @@ export const FountainsRequest = z
     tag: TagFilterSchema,
     recencyMode: RecencyMode.default("any"),
     recencyMonths: z.number().positive().default(6),
-    // Also fetch lifecycle-prefixed variants (disused:/abandoned:) so out-of-service
-    // points can be surfaced and filtered client-side. Off by default so the survey
-    // tool keeps seeing only active points.
+    // Also fetch the disused: lifecycle variant so out-of-order points can be
+    // surfaced and filtered client-side. abandoned: (removed) is never fetched:
+    // a removed point doesn't appear on the map at all. Off by default so the
+    // survey tool keeps seeing only active points.
     includeDisused: z.boolean().default(false),
   })
   .refine(

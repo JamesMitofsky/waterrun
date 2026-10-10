@@ -102,14 +102,6 @@ describe("fountainDotStyle", () => {
     ).toEqual({ color: "#9ca3af", opacity: 0.7 });
   });
 
-  it("draws abandoned the same as disused", () => {
-    for (const check_date of ["2026-02-01", "2024-06-01", "2020-01-01"]) {
-      expect(fountainDotStyle({ check_date, "abandoned:amenity": "drinking_water" }, NOW)).toEqual(
-        fountainDotStyle({ check_date, "disused:amenity": "drinking_water" }, NOW),
-      );
-    }
-  });
-
   it("keeps red for out-of-service last surveyed over 3 years ago", () => {
     expect(fountainDotStyle({ check_date: "2020-01-01", disused: "yes" }, NOW)).toEqual({
       color: "#ef4444",
