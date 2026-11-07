@@ -1,0 +1,16 @@
+{
+  "name": "water-run-store-art",
+  "private": true,
+  "description": "App Store screenshots, preview video and metadata for Water Run. Not part of the pnpm workspace.",
+  "type": "module",
+  "scripts": {
+    "maps": "node scripts/render-maps.mjs",
+    "shots": "node scripts/render-shots.mjs",
+    "video": "node scripts/render-video.mjs",
+    "all": "node scripts/render-maps.mjs && node scripts/render-shots.mjs && node scripts/render-video.mjs"
+  },
+  "dependencies": {
+    "@phosphor-icons/core": "^2.1.1",
+    "maplibre-gl": "4.7.1"
+  }
+}

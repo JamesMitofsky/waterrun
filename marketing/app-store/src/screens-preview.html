@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="common.css" />
+    <style>
+      body {
+        display: flex;
+        gap: 40px;
+        padding: 40px;
+        background: #ddd;
+        width: max-content;
+      }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import * as S from "./screens.js";
+      const d = await S.loadData("..");
+      document.body.innerHTML = [
+        S.nearby(d),
+        S.planner(d),
+        S.runScreen(d),
+        S.surveySheet(d),
+        S.lockScreen(d, { wallpaper: `<img class="map" src="../assets/maps/night-tall.png">` }),
+        S.recap(d),
+      ].join("");
+      await document.fonts.ready;
+      await Promise.all([...document.images].map((i) => i.decode()));
+      window.READY = true;
+    </script>
+  </body>
+</html>

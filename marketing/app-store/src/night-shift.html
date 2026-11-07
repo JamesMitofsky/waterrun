@@ -1,0 +1,190 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Night Shift — Water Run store art</title>
+    <link rel="stylesheet" href="common.css" />
+    <style>
+      /* Direction B — NIGHT SHIFT.
+     The app's own run palette (near-black #0c0d0a, lime #ccff2e) as a single
+     panorama: one lime line is the run, and it never breaks — it leaves each
+     frame where the next one picks it up, so the six screenshots read as one
+     long run when they sit side by side in the App Store. */
+      :root {
+        --night: #0c0d0a;
+        --lime: #ccff2e;
+        --ink: #eef2f6;
+        --dim: #8fa3b3;
+      }
+      body {
+        position: relative;
+        width: 2640px;
+        height: 956px;
+        background: var(--night);
+        overflow: hidden;
+      }
+      .layer {
+        position: absolute;
+        inset: 0;
+        width: 2640px;
+        height: 956px;
+      }
+      .frame {
+        position: absolute;
+        top: 0;
+        width: 440px;
+        height: 956px;
+        overflow: hidden;
+      }
+      h1 {
+        position: absolute;
+        left: 26px;
+        width: 390px;
+        font: 800 66px/0.9 "Bricolage Grotesque";
+        font-stretch: 75%;
+        letter-spacing: -0.02em;
+        color: var(--ink);
+        z-index: 6;
+        text-wrap: balance;
+      }
+      h1 b {
+        color: var(--lime);
+        font-weight: 800;
+      }
+      .kicker {
+        position: absolute;
+        left: 28px;
+        top: 30px;
+        font: 500 10px/1 "DM Mono";
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--dim);
+        z-index: 6;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+      .kicker i {
+        width: 7px;
+        height: 7px;
+        border-radius: 4px;
+        background: var(--lime);
+        display: inline-block;
+        box-shadow: 0 0 10px var(--lime);
+      }
+      .logo {
+        -webkit-mask: url(../assets/logo-ink.png) center/contain no-repeat;
+        mask: url(../assets/logo-ink.png) center/contain no-repeat;
+        background: var(--lime);
+      }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import * as S from "./screens.js";
+      import { curve, defs, device, grain, lanes, routePx, smooth } from "./art.js";
+
+      const d = await S.loadData("..");
+
+      // The line, hand-placed across all six frames (x in panorama px). It passes
+      // behind every handset and surfaces in the gaps.
+      const P = [
+        [-30, 610],
+        [60, 560],
+        [70, 330],
+        [210, 300],
+        [420, 320],
+        [470, 470],
+        [500, 720],
+        [640, 905],
+        [840, 880],
+        [905, 700],
+        [920, 360],
+        [1060, 300],
+        [1300, 320],
+        [1345, 520],
+        [1360, 860],
+        [1520, 920],
+        [1720, 900],
+        [1770, 640],
+        [1780, 330],
+        [1960, 300],
+        [2180, 310],
+        [2215, 520],
+        [2225, 880],
+        [2380, 930],
+        [2560, 860],
+        [2610, 700],
+        [2700, 640],
+      ];
+      const line = curve(P, 0.9);
+
+      // Where the run passes a fountain: the Live Activity's lime drop, ringed.
+      const drops = [
+        [60, 560],
+        [470, 470],
+        [905, 700],
+        [1345, 520],
+        [1770, 640],
+        [2215, 520],
+        [2610, 700],
+      ];
+      const drop = ([x, y], n) => `
+  <g transform="translate(${x} ${y})">
+    <circle r="17" fill="#0c0d0a" stroke="#ccff2e" stroke-width="2.5"/>
+    <svg x="-9" y="-9" width="18" height="18" viewBox="0 0 256 256" fill="#ccff2e">${S.icon("drop", 0, "", "fill").replace(/^<svg[^>]*>|<\/svg>$/g, "")}</svg>
+    <text x="24" y="-14" font-family="DM Mono" font-size="9.5" letter-spacing="1.5" fill="#8fa3b3">0${n}</text>
+  </g>`;
+
+      const glowLine = `
+  <svg class="layer" viewBox="0 0 2640 956" style="z-index:1">
+    <path d="${line}" fill="none" stroke="#ccff2e" stroke-width="22" stroke-opacity=".10" stroke-linecap="round" style="filter:blur(10px)"/>
+    <path d="${line}" fill="none" stroke="#ccff2e" stroke-width="5" stroke-linecap="round"/>
+  </svg>
+  <svg class="layer" viewBox="0 0 2640 956" style="z-index:2">${drops.map((p, i) => drop(p, i + 1)).join("")}</svg>`;
+
+      const glow = "0 30px 80px rgba(0,0,0,.65), 0 0 120px rgba(204,255,46,.08)";
+      const nightLock = () => {
+        const v = d.maps["night-tall"];
+        const pts = smooth(routePx(v, d.run.trace), 2);
+        return S.lockScreen(d, {
+          wallpaper: `<img class="map" src="../assets/maps/night-tall.png"><svg class="overlay" viewBox="0 0 440 956"><path d="${pts.map(([x, y], i) => `${i ? "L" : "M"}${x} ${y}`).join("")}" fill="none" stroke="#ccff2e" stroke-width="3" stroke-linejoin="round" opacity=".9"/></svg>`,
+        });
+      };
+      const kick = (t) => `<div class="kicker"><i></i>${t}</div>`;
+
+      const frames = [
+        `${kick("Water Run")}
+   <h1 style="top:62px;font-size:70px"><b style="font-size:118px;line-height:.86;display:block">0.35 mi</b>to water that works.</h1>
+   ${device(S.runScreen(d), { x: 92, y: 340, scale: 0.66, glow })}`,
+        `${kick("Nearby")}
+   <h1 style="top:62px">Every fountain, <b>by when it was last checked.</b></h1>
+   ${device(S.nearby(d), { x: 66, y: 330, scale: 0.66, glow })}`,
+        `${kick("Plan")}
+   <h1 style="top:62px"><b>9</b> fountains. <b>14.6</b> miles. One loop.</h1>
+   ${device(S.planner(d), { x: 78, y: 330, scale: 0.66, glow })}`,
+        `${kick("Survey")}
+   <h1 style="top:62px">Tap. Logged. <b>Keep running.</b></h1>
+   ${device(S.surveySheet(d), { x: 70, y: 300, scale: 0.66, glow })}`,
+        `${kick("Live Activity")}
+   <h1 style="top:62px">Phone in your pocket? <b>Still guiding.</b></h1>
+   ${device(nightLock(), { x: 78, y: 330, scale: 0.66, glow })}`,
+        `${kick("Open data")}
+   <h1 style="top:62px"><b>8 of 9</b> checked. The map’s better for it.</h1>
+   ${device(S.recap(d), { x: 66, y: 330, scale: 0.66, glow })}
+   <div class="logo" style="position:absolute;right:30px;top:244px;width:62px;height:62px;z-index:6"></div>`,
+      ];
+
+      document.body.innerHTML = `${defs()}
+  <img class="layer" src="../assets/maps/night-pano.png" style="opacity:.85">
+  <div class="layer" style="background:radial-gradient(ellipse 70% 60% at 50% 55%, transparent, rgba(12,13,10,.75))"></div>
+  <div class="layer" style="background:linear-gradient(180deg, rgba(12,13,10,.92) 0%, rgba(12,13,10,.55) 30%, transparent 45%)"></div>
+  ${glowLine}
+  ${frames.map((f, i) => `<section class="frame" style="left:${i * 440}px;z-index:3">${f}</section>`).join("")}
+  <div class="layer" style="z-index:9;pointer-events:none">${grain(0.1, "screen").replace('viewBox="0 0 440 956"', 'viewBox="0 0 2640 956"').replace('<rect width="440"', '<rect width="2640"')}</div>`;
+      await document.fonts.ready;
+      await Promise.all([...document.images].map((i) => i.decode()));
+      window.READY = true;
+    </script>
+  </body>
+</html>

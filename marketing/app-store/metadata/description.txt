@@ -1,0 +1,26 @@
+Half the drinking fountains on a map are broken, bone dry, or long gone. Water Run fixes that the only way it can be fixed: someone goes and looks. That someone is you, on your run.
+
+FIND WATER THAT WORKS
+The Nearby map colours every public fountain by how recently a person actually checked it: green for this season, orange for months ago, red for a year or more. You know what you're running toward before you get there.
+
+PLAN A LOOP PAST THE UNCHECKED ONES
+Tap the fountains you want to pass, or touch and hold the map to route through a spot. Water Run draws a real running route through them, as a loop or one way, and tells you how far it is. Reverse it with one tap.
+
+RUN IT. WE'LL POINT THE WAY.
+On the run you get what matters at a glance: distance and direction to the next fountain, the next turn, and when it was last checked. Arrive, and the survey opens on its own.
+
+ONE TAP, MID-STRIDE
+Working? Tap once and keep going. Problem? Two more taps say whether it's partially working, totally out of order, or not there at all. Add details when you want to: bottle filler, dog bowl, seasonal, a short note.
+
+ON YOUR LOCK SCREEN
+Your next stop, distance and turn stay on the Lock Screen and in the Dynamic Island as a Live Activity, so your phone can stay in your pocket.
+
+FOUND ONE THAT ISN'T ON THE MAP?
+Touch and hold where it stands, or tap + where you're standing, and add it.
+
+IT GOES ON THE PUBLIC MAP
+Every check is saved to OpenStreetMap, the free map that countless other apps and services draw on. So a fountain you confirm today helps the next thirsty runner, cyclist, parent or dog walker, whatever app they use. Start checking straight away; your updates wait safely on your phone until you sign in with a free OpenStreetMap account.
+
+Free. No ads. Made by runners, for everyone who gets thirsty.
+
+Map data © OpenStreetMap contributors.

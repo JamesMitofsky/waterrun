@@ -1,0 +1,218 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Field Notes — Water Run store art</title>
+    <link rel="stylesheet" href="common.css" />
+    <style>
+      /* Direction A — FIELD NOTES.
+     The icon's two colours (blue ink on cream) taken all the way: each frame is
+     a page from a runner's survey notebook, the app's screens tipped in like
+     specimens, the route laid with the logo's many-bristled "RUN" stroke. */
+      :root {
+        --paper: #f7f2e8;
+        --ink: #1e71bd;
+        --deep: #0b2f55;
+        --pencil: #7d7765;
+        --red: #d6402a;
+        --green: #1f8a4c;
+      }
+      body {
+        position: relative;
+        width: 2640px;
+        height: 956px;
+      }
+      .frame {
+        position: absolute;
+        top: 0;
+        width: 440px;
+        height: 956px;
+        overflow: hidden;
+        background: var(--paper);
+      }
+      .folio {
+        position: absolute;
+        top: 26px;
+        left: 26px;
+        right: 26px;
+        display: flex;
+        justify-content: space-between;
+        font: 500 9.5px/1 "DM Mono";
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--pencil);
+        z-index: 6;
+      }
+      h1 {
+        text-wrap: balance;
+        position: absolute;
+        left: 24px;
+        width: 392px;
+        font: 400 52px/0.98 "Instrument Serif";
+        letter-spacing: -0.015em;
+        color: var(--deep);
+        z-index: 6;
+      }
+      h1 em {
+        color: var(--ink);
+      }
+      .mono {
+        font: 500 9.5px/1.35 "DM Mono";
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--pencil);
+      }
+      .note {
+        position: absolute;
+        z-index: 7;
+      }
+      .stamp {
+        position: absolute;
+        z-index: 8;
+        border: 3px solid currentColor;
+        border-radius: 10px;
+        padding: 9px 14px 7px;
+        font: 500 21px/1 "DM Mono";
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        filter: url(#stamp);
+        mix-blend-mode: multiply;
+      }
+      .stamp::after {
+        content: "";
+        position: absolute;
+        inset: 3px;
+        border: 1px solid currentColor;
+        border-radius: 6px;
+      }
+      .rule {
+        position: absolute;
+        left: 0;
+        right: 0;
+        height: 1px;
+        background: rgba(30, 113, 189, 0.18);
+      }
+      .shadow {
+        box-shadow:
+          0 1px 1px rgba(60, 48, 24, 0.25),
+          0 18px 40px -8px rgba(60, 48, 24, 0.35),
+          0 40px 80px -30px rgba(11, 47, 85, 0.35);
+      }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import * as S from "./screens.js";
+      import { defs, grain, lanes, place, routePx, smooth } from "./art.js";
+
+      const d = await S.loadData("..");
+      const loop = d.maps["paper-loop"],
+        street = d.maps["paper-street"];
+      const loopPts = smooth(routePx(loop, d.run.trace), 2);
+      const streetPts = smooth(routePx(street, d.run.trace), 2);
+      const shadow =
+        "0 1px 1px rgba(60,48,24,.25), 0 22px 44px -10px rgba(60,48,24,.38), 0 50px 90px -30px rgba(11,47,85,.35)";
+      const folio = (n) =>
+        `<div class="folio"><span>Water Run · Field Notes</span><span>Nº 0${n} / 06</span></div>`;
+      const grid = (step = 22, a = 0.09) =>
+        `<div style="position:absolute;inset:0;background-image:linear-gradient(rgba(30,113,189,${a}) 1px,transparent 1px),linear-gradient(90deg,rgba(30,113,189,${a}) 1px,transparent 1px);background-size:${step}px ${step}px"></div>`;
+      const ruled = () =>
+        Array.from(
+          { length: 40 },
+          (_, i) => `<div class="rule" style="top:${120 + i * 24}px"></div>`,
+        ).join("") +
+        `<div style="position:absolute;top:0;bottom:0;left:30px;width:1px;background:rgba(214,64,42,.28)"></div>`;
+      const legendRow = (c, label, sub) =>
+        `<div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:14px"><svg width="14" height="14" style="margin-top:1px"><circle cx="7" cy="7" r="5.5" fill="${c}" stroke="#fff" stroke-width="1.5"/></svg><div><div class="mono" style="color:var(--deep)">${label}</div><div class="mono" style="font-size:8.5px">${sub}</div></div></div>`;
+      const loopMap = (opacity = 0.6, extra = "") => `
+  <img src="../assets/maps/paper-loop.png" style="position:absolute;inset:0;width:440px;height:956px;opacity:${opacity}${extra}">`;
+      // Paper laid back over the map where the headline sits, so the type reads clean.
+      const fade = `<div style="position:absolute;inset:0;background:linear-gradient(180deg,#f7f2e8 0%,rgba(247,242,232,.9) 22%,rgba(247,242,232,0) 40%);z-index:1"></div>`;
+      const svg = (inner, style = "") =>
+        `<svg viewBox="0 0 440 956" style="position:absolute;inset:0;width:440px;height:956px;${style}">${inner}</svg>`;
+
+      // A stop marked the way a surveyor rings it in pencil.
+      const ring = (x, y, r = 16, rot = 0) =>
+        `<ellipse cx="${x}" cy="${y}" rx="${r}" ry="${r * 0.82}" transform="rotate(${rot} ${x} ${y})" fill="none" stroke="var(--red)" stroke-width="1.6" filter="url(#brush)" opacity=".85"/>`;
+
+      const frames = [
+        // 1 — the promise
+        `${loopMap(0.55)}
+   ${svg(lanes(loopPts, { n: 7, gap: 2.4, width: 1.5, color: "#1e71bd", seed: 4 }), "opacity:.9")}
+   ${fade}
+   ${folio(1)}
+   <h1 style="top:62px;font-size:56px">Water, <em>verified</em> by the people who run past it.</h1>
+   <div class="note" style="left:14px;top:410px;width:140px;padding:12px 10px 0;background:rgba(247,242,232,.88);border-radius:6px">
+     <div class="mono" style="margin-bottom:16px;color:var(--ink)">Key —</div>
+     ${legendRow(S.FRESH.fresh, "Checked lately", "this season")}
+     ${legendRow(S.FRESH.aging, "Due a look", "months ago")}
+     ${legendRow(S.FRESH.old, "Overdue", "a year or more")}
+     ${legendRow(S.FRESH.retired, "Retired", "gone or off")}
+   </div>
+   ${place(S.nearby(d), { x: 150, y: 318, scale: 0.68, rotate: 3.5, radius: 52, shadow })}
+   ${grain(0.22)}`,
+
+        // 2 — plan
+        `${grid()}
+   ${folio(2)}
+   <h1 style="top:62px">Plan a loop past the fountains <em>nobody’s checked lately.</em></h1>
+   ${place(S.planner(d), { x: 34, y: 300, scale: 0.7, rotate: -2.5, radius: 52, shadow })}
+   <div class="stamp" style="left:262px;top:322px;color:var(--ink);transform:rotate(8deg);text-align:center;font-size:17px;line-height:1.25;padding:14px 16px 11px">9 stops<br>14.61 mi<br><span style="font-size:11px">one loop</span></div>
+   ${grain(0.22)}`,
+
+        // 3 — run
+        `${ruled()}
+   ${folio(3)}
+   ${place(S.runScreen(d), { x: 66, y: 58, scale: 0.7, rotate: 2, radius: 52, shadow })}
+   <div class="note mono" style="left:24px;top:866px;color:var(--ink)">Fig. 3 — 0.35 mi west, to Stead Park · P St NW</div>
+   <h1 style="top:732px">Run it. <em>We’ll point the way.</em></h1>
+   ${grain(0.22)}`,
+
+        // 4 — survey
+        `${grid(30, 0.06)}
+   ${folio(4)}
+   <h1 style="top:62px">Working? Broken? <em>One tap,</em> mid-stride.</h1>
+   ${place(S.surveySheet(d), { x: 70, y: 304, scale: 0.7, rotate: 2.5, radius: 52, shadow })}
+   <div class="stamp" style="left:22px;top:206px;color:var(--green);transform:rotate(-7deg)">Working ✓</div>
+   <div class="stamp" style="left:214px;top:222px;color:var(--red);transform:rotate(5deg)">Out of order</div>
+   ${grain(0.22)}`,
+
+        // 5 — Live Activity
+        `${loopMap(0.32)}
+   ${svg(lanes(loopPts, { n: 7, gap: 2.4, width: 1.5, color: "#1e71bd", seed: 9 }), "opacity:.35")}
+   ${fade}
+   ${folio(5)}
+   <h1 style="top:62px">Directions stay <em>on your Lock Screen.</em></h1>
+   ${place(
+     S.lockScreen(d, {
+       ink: "#0b2f55",
+       wallpaper: `<div style="position:absolute;inset:0;background:#f7f2e8"></div><img class="map" src="../assets/maps/paper-street.png" style="opacity:.8">${svg(lanes(streetPts, { n: 7, gap: 3.4, width: 2.2, seed: 2 }))}`,
+     }),
+     { x: 64, y: 300, scale: 0.71, rotate: -2, radius: 52, shadow },
+   )}
+   <div class="note mono" style="left:24px;top:258px;color:var(--ink)">Live Activity · Dynamic Island</div>
+   ${grain(0.22)}`,
+
+        // 6 — the public map
+        `${loopMap(0.5)}
+   ${svg(lanes(loopPts, { n: 7, gap: 2.4, width: 1.5, color: "#1e71bd", seed: 6 }), "opacity:.75")}
+   ${fade}
+   ${folio(6)}
+   <h1 style="top:62px">Every check lands on the <em>public map,</em> for everyone.</h1>
+   ${place(S.recap(d), { x: 40, y: 334, scale: 0.67, rotate: -3, radius: 52, shadow })}
+   <img src="../assets/logo-ink.png" style="position:absolute;left:22px;top:226px;width:64px;z-index:7;transform:rotate(-3deg)">
+   <div class="note mono" style="left:100px;top:244px;line-height:1.7;color:var(--deep)">Saved to OpenStreetMap · Free<br>No ads · No sign-up to start</div>
+   ${grain(0.22)}`,
+      ];
+
+      document.body.innerHTML =
+        defs() +
+        frames
+          .map((f, i) => `<section class="frame" style="left:${i * 440}px">${f}</section>`)
+          .join("");
+      await document.fonts.ready;
+      await Promise.all([...document.images].map((i) => i.decode()));
+      window.READY = true;
+    </script>
+  </body>
+</html>

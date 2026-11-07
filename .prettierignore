@@ -23,3 +23,9 @@ expo-env.d.ts
 **/.astro/
 dist/
 **/dist/
+
+# App Store kit: generated data and rendered output — not source
+marketing/app-store/src/dc-run.json
+marketing/app-store/src/icons.js
+marketing/app-store/assets/
+marketing/app-store/export/

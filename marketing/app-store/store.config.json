@@ -1,0 +1,45 @@
+{
+  "configVersion": 0,
+  "apple": {
+    "copyright": "2026 Water Run",
+    "categories": ["HEALTH_AND_FITNESS", "NAVIGATION"],
+    "info": {
+      "en-US": {
+        "title": "Water Run: Fountain Map",
+        "subtitle": "Fountains that actually work",
+        "description": "Half the drinking fountains on a map are broken, bone dry, or long gone. Water Run fixes that the only way it can be fixed: someone goes and looks. That someone is you, on your run.\n\nFIND WATER THAT WORKS\nThe Nearby map colours every public fountain by how recently a person actually checked it: green for this season, orange for months ago, red for a year or more. You know what you're running toward before you get there.\n\nPLAN A LOOP PAST THE UNCHECKED ONES\nTap the fountains you want to pass, or touch and hold the map to route through a spot. Water Run draws a real running route through them, as a loop or one way, and tells you how far it is. Reverse it with one tap.\n\nRUN IT. WE'LL POINT THE WAY.\nOn the run you get what matters at a glance: distance and direction to the next fountain, the next turn, and when it was last checked. Arrive, and the survey opens on its own.\n\nONE TAP, MID-STRIDE\nWorking? Tap once and keep going. Problem? Two more taps say whether it's partially working, totally out of order, or not there at all. Add details when you want to: bottle filler, dog bowl, seasonal, a short note.\n\nON YOUR LOCK SCREEN\nYour next stop, distance and turn stay on the Lock Screen and in the Dynamic Island as a Live Activity, so your phone can stay in your pocket.\n\nFOUND ONE THAT ISN'T ON THE MAP?\nTouch and hold where it stands, or tap + where you're standing, and add it.\n\nIT GOES ON THE PUBLIC MAP\nEvery check is saved to OpenStreetMap, the free map that countless other apps and services draw on. So a fountain you confirm today helps the next thirsty runner, cyclist, parent or dog walker, whatever app they use. Start checking straight away; your updates wait safely on your phone until you sign in with a free OpenStreetMap account.\n\nFree. No ads. Made by runners, for everyone who gets thirsty.\n\nMap data © OpenStreetMap contributors.",
+        "keywords": [
+          "drinking",
+          "refill",
+          "bottle",
+          "hydration",
+          "running",
+          "runner",
+          "route",
+          "loop",
+          "openstreetmap",
+          "jog",
+          "park",
+          "bubbler",
+          "tap",
+          "survey"
+        ],
+        "releaseNotes": "The first Water Run for iPhone. Find working fountains near you, plan a loop past the ones nobody has checked lately, and record what you find with a tap. Your guidance follows you onto the Lock Screen.",
+        "promoText": "New: your next fountain and your next turn now ride along on the Lock Screen and in the Dynamic Island. Phone in your pocket, guidance still on.",
+        "marketingUrl": "https://waterrun.app",
+        "supportUrl": "https://waterrun.app/feedback",
+        "privacyPolicyUrl": "https://waterrun.app/privacy",
+        "screenshots": {
+          "APP_IPHONE_67": [
+            "../../marketing/app-store/export/screenshots/public-works/01-nearby.jpg",
+            "../../marketing/app-store/export/screenshots/public-works/02-plan.jpg",
+            "../../marketing/app-store/export/screenshots/public-works/03-run.jpg",
+            "../../marketing/app-store/export/screenshots/public-works/04-survey.jpg",
+            "../../marketing/app-store/export/screenshots/public-works/05-lock-screen.jpg",
+            "../../marketing/app-store/export/screenshots/public-works/06-public-map.jpg"
+          ]
+        }
+      }
+    }
+  }
+}

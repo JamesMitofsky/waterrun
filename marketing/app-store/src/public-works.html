@@ -1,0 +1,243 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Public Works — Water Run store art</title>
+    <link rel="stylesheet" href="common.css" />
+    <style>
+      /* Direction C — PUBLIC WORKS.
+     Fountains are civic infrastructure, so the store page speaks the street's
+     own language: US road-sign conventions (blue = services, yellow = warning,
+     orange = work zone, brown = recreation), set in Overpass — the open face
+     drawn from Highway Gothic — on pale sidewalk concrete, with the
+     hand-painted logo chalked onto the slabs. */
+      :root {
+        --concrete: #dedad2;
+        --joint: #b8b2a5;
+        --svc: #0b4a92;
+        --warn: #ffc61a;
+        --work: #f37021;
+        --rec: #5e3a1e;
+        --guide: #006b3f;
+        --chalk: #3f83c2;
+      }
+      body {
+        position: relative;
+        width: 2640px;
+        height: 956px;
+        background: var(--concrete);
+        overflow: hidden;
+      }
+      .layer {
+        position: absolute;
+        inset: 0;
+        width: 2640px;
+        height: 956px;
+      }
+      .frame {
+        position: absolute;
+        top: 0;
+        width: 440px;
+        height: 956px;
+        overflow: hidden;
+      }
+      .sign {
+        position: absolute;
+        z-index: 5;
+        border-radius: 16px;
+        color: #fff;
+        font-family: "Overpass";
+        text-transform: uppercase;
+        box-shadow:
+          0 3px 0 rgba(0, 0, 0, 0.28),
+          0 22px 30px -12px rgba(40, 34, 24, 0.45);
+      }
+      .sign::before {
+        content: "";
+        position: absolute;
+        inset: 6px;
+        border: 3.5px solid currentColor;
+        border-radius: 11px;
+        pointer-events: none;
+      }
+      .sign.flat::before {
+        display: none;
+      }
+      .bolt {
+        position: absolute;
+        left: 50%;
+        width: 9px;
+        height: 9px;
+        margin-left: -4.5px;
+        border-radius: 50%;
+        background: radial-gradient(circle at 35% 35%, #fff, #9aa0a6 60%, #5f656b);
+        z-index: 6;
+      }
+      .post {
+        position: absolute;
+        z-index: 1;
+        width: 16px;
+        margin-left: -8px;
+        background: linear-gradient(90deg, #7b8085, #d9dcdf 35%, #a4a9ae 60%, #6d7277);
+      }
+      .post::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: repeating-linear-gradient(
+          180deg,
+          transparent 0 18px,
+          rgba(0, 0, 0, 0.35) 18px 22px
+        );
+        width: 4px;
+        left: 6px;
+      }
+      .legend {
+        font-weight: 800;
+        letter-spacing: 0.01em;
+        line-height: 0.92;
+      }
+      .small {
+        font-weight: 700;
+        letter-spacing: 0.06em;
+      }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import * as S from "./screens.js";
+      import { defs, device, grain, lanes, routePx, smooth } from "./art.js";
+
+      const d = await S.loadData("..");
+
+      // The pictogram: a pedestal fountain with its arc of water, white on blue.
+      const fountainGlyph = (size = 84, fg = "#0b4a92", bg = "#fff") => `
+  <svg width="${size}" height="${size}" viewBox="0 0 100 100">
+    <rect width="100" height="100" rx="10" fill="${bg}"/>
+    <g fill="${fg}">
+      <path d="M22 50h56c0 9-8 15-18 16v4h-20v-4c-10-1-18-7-18-16z"/>
+      <rect x="44" y="70" width="12" height="16"/>
+      <rect x="32" y="84" width="36" height="6" rx="2"/>
+      <circle cx="31" cy="27" r="7"/>
+    </g>
+    <path d="M60 50c0-12 4-22 13-26" fill="none" stroke="${fg}" stroke-width="5" stroke-linecap="round"/>
+    <path d="M40 36c6-6 12-6 16 2" fill="none" stroke="${fg}" stroke-width="5" stroke-linecap="round"/>
+  </svg>`;
+
+      const arrow = (deg, size = 64, color = "#fff") => `
+  <svg width="${size}" height="${size}" viewBox="0 0 100 100" style="transform:rotate(${deg}deg)">
+    <path d="M50 8 88 50H62v42H38V50H12z" fill="${color}"/>
+  </svg>`;
+
+      const post = (x, top) =>
+        `<div class="post" style="left:${x}px;top:${top}px;bottom:-10px"></div>`;
+      const bolts = (top, bottom) =>
+        `<div class="bolt" style="top:${top}px"></div><div class="bolt" style="bottom:${bottom}px"></div>`;
+      const plaque = (html, style) =>
+        `<div class="sign" style="background:#fff;color:#111;${style}">${html}</div>`;
+      const phone = (screen, y = 392) =>
+        device(screen, {
+          x: 74,
+          y,
+          scale: 0.63,
+          edge: "#aeb3b8",
+          glow: "0 40px 60px -20px rgba(40,34,24,.55)",
+        });
+
+      const frames = [
+        // 1 — the service sign
+        `${post(220, 250)}
+   <div class="sign" style="left:30px;top:44px;width:380px;height:198px;background:var(--svc);padding:24px 26px;display:flex;gap:20px;align-items:center">
+     ${fountainGlyph(116)}
+     <div>
+       <div class="legend" style="font-size:42px">Drinking<br>water</div>
+       <div style="display:flex;align-items:center;gap:6px;margin-top:10px">${arrow(45, 38)}<span class="legend tnum" style="font-size:34px">0.35 mi</span></div>
+     </div>
+   </div>
+   ${plaque(`<div class="legend" style="font-size:30px;text-align:center">That works</div>`, "left:66px;top:256px;width:248px;padding:17px 0 13px")}
+   ${phone(S.nearby(d), 360)}`,
+
+        // 2 — the guide sign
+        `${post(220, 270)}
+   <div class="sign" style="left:28px;top:44px;width:384px;height:212px;background:var(--guide);padding:24px 26px;display:flex;flex-direction:column;justify-content:center">
+     <div style="display:flex;align-items:center;gap:16px">
+       <svg width="78" height="82" viewBox="0 0 78 82"><path d="M4 6c12 2 23-1 35-5 12 4 23 7 35 5 4 26 0 50-35 75C4 56 0 32 4 6z" fill="#fff" stroke="#111" stroke-width="3"/><text x="39" y="56" text-anchor="middle" font-family="Overpass" font-weight="800" font-size="40" fill="#111">9</text></svg>
+       <div class="legend" style="font-size:40px">Fountain<br>loop</div>
+     </div>
+     <div class="small tnum" style="font-size:20px;margin-top:16px;display:flex;justify-content:space-between"><span>9 stops</span><span>14.6 mi</span><span>start ⟲</span></div>
+   </div>
+   ${plaque(`<div class="legend" style="font-size:24px;text-align:center">Plan past the<br>unchecked ones</div>`, "left:76px;top:270px;width:288px;padding:16px 0 12px")}
+   ${phone(S.planner(d), 400)}`,
+
+        // 3 — the warning diamond
+        `${post(220, 250)}
+   <div style="position:absolute;left:120px;top:36px;width:200px;height:200px;z-index:5">
+     <div style="position:absolute;inset:29px;transform:rotate(45deg);background:var(--warn);border-radius:14px;box-shadow:0 3px 0 rgba(0,0,0,.28), 0 22px 30px -12px rgba(40,34,24,.45)">
+       <div style="position:absolute;inset:6px;border:3.5px solid #111;border-radius:10px"></div>
+     </div>
+     <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">${S.icon("person-simple-run", 92, "#111", "fill")}</div>
+   </div>
+   ${plaque(`<div class="legend tnum" style="font-size:30px;display:flex;align-items:center;justify-content:center;gap:8px">${arrow(-90, 30, "#111")} Stead Park 0.35 mi</div>`, "left:30px;top:262px;width:380px;padding:17px 0 13px;background:var(--warn)")}
+   ${phone(S.runScreen(d), 362)}`,
+
+        // 4 — the work zone
+        `${post(220, 250)}
+   <div class="sign" style="left:40px;top:44px;width:360px;height:178px;background:var(--work);color:#111;padding:26px;text-align:center;display:flex;flex-direction:column;justify-content:center">
+     <div class="small" style="font-size:20px">Fountain check</div>
+     <div class="legend" style="font-size:60px;margin-top:6px">One tap</div>
+   </div>
+   <div style="position:absolute;left:40px;top:236px;width:360px;display:flex;gap:12px;z-index:5">
+     <div class="sign flat" style="position:relative;flex:1;background:#15803d;padding:15px 0 11px;text-align:center"><span class="legend" style="font-size:24px">Working</span></div>
+     <div class="sign flat" style="position:relative;flex:1;background:#fff;color:#111;padding:15px 0 11px;text-align:center"><span class="legend" style="font-size:24px">Problem</span></div>
+   </div>
+   ${phone(S.surveySheet(d), 330)}`,
+
+        // 5 — the regulatory sign
+        `${post(220, 270)}
+   <div class="sign" style="left:70px;top:40px;width:300px;height:236px;background:#fff;color:#111;padding:26px;text-align:center;display:flex;flex-direction:column;justify-content:center;gap:6px">
+     <div class="small" style="font-size:19px">Guidance continues</div>
+     <div class="legend" style="font-size:50px">On lock<br>screen</div>
+     <div class="small" style="font-size:13.5px;color:#444;white-space:nowrap">Live Activity + Dynamic Island</div>
+   </div>
+   ${phone(
+     S.lockScreen(d, {
+       wallpaper: `<img class="map" src="../assets/maps/enamel-street.png"><svg class="overlay" viewBox="0 0 440 956"><path d="${smooth(
+         routePx(d.maps["enamel-street"], d.run.trace),
+         2,
+       )
+         .map(([x, y], i) => `${i ? "L" : "M"}${x} ${y}`)
+         .join("")}" fill="none" stroke="#ffc61a" stroke-width="4" stroke-linejoin="round"/></svg>`,
+     }),
+     360,
+   )}`,
+
+        // 6 — the recreation sign
+        `${post(220, 260)}
+   <div class="sign" style="left:28px;top:44px;width:384px;height:204px;background:var(--rec);padding:24px 28px;display:flex;flex-direction:column;justify-content:center">
+     <div class="small" style="font-size:19px;color:#f3e4cf">Fountains</div>
+     <div class="legend" style="font-size:46px;margin-top:4px">Maintained<br>by runners</div>
+   </div>
+   ${plaque(`<div class="small" style="font-size:17px;text-align:center;line-height:1.3">Open data · OpenStreetMap<br>Free · No ads</div>`, "left:64px;top:262px;width:312px;padding:15px 0 11px")}
+   ${phone(S.recap(d), 380)}`,
+      ];
+
+      // Sidewalk: slab joints running the whole panorama, and the logo chalked on
+      // a slab beside the first sign.
+      const slab = 147;
+      const joints = `
+  <svg class="layer" viewBox="0 0 2640 956" style="z-index:1">
+    ${Array.from({ length: 19 }, (_, i) => `<line x1="${i * slab + 40}" y1="0" x2="${i * slab + 40}" y2="956" stroke="#b5ae9f" stroke-width="2.5"/><line x1="${i * slab + 42}" y1="0" x2="${i * slab + 42}" y2="956" stroke="#f1eee8" stroke-width="1"/>`).join("")}
+    ${Array.from({ length: 7 }, (_, i) => `<line x1="0" y1="${i * slab + 70}" x2="2640" y2="${i * slab + 70}" stroke="#b5ae9f" stroke-width="2.5"/><line x1="0" y1="${i * slab + 72}" x2="2640" y2="${i * slab + 72}" stroke="#f1eee8" stroke-width="1"/>`).join("")}
+  </svg>`;
+
+      document.body.innerHTML = `${defs()}
+  ${joints}
+  <img src="../assets/logo-ink.png" style="position:absolute;left:352px;top:250px;width:78px;z-index:2;mix-blend-mode:multiply;opacity:.78;transform:rotate(-9deg);filter:url(#brush)">
+  ${frames.map((f, i) => `<section class="frame" style="left:${i * 440}px;z-index:3">${f}</section>`).join("")}
+  <div class="layer" style="z-index:9;pointer-events:none">${grain(0.3).replace('viewBox="0 0 440 956"', 'viewBox="0 0 2640 956"').replace('<rect width="440"', '<rect width="2640"')}</div>`;
+      await document.fonts.ready;
+      await Promise.all([...document.images].map((i) => i.decode()));
+      window.READY = true;
+    </script>
+  </body>
+</html>
