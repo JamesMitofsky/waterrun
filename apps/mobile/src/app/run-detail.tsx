@@ -104,9 +104,9 @@ export default function RunDetail() {
               key={s.id}
               className="flex-row items-center gap-3"
               accessible
-              accessibilityLabel={`Stop ${i + 1}, ${s.tags?.name ?? "Unnamed fountain"}, ${
-                STATUS_LABEL[s.status]
-              }`}
+              accessibilityLabel={[`Stop ${i + 1}`, s.tags?.name, STATUS_LABEL[s.status]]
+                .filter(Boolean)
+                .join(", ")}
             >
               <View
                 className="h-6 w-6 items-center justify-center rounded-full"
@@ -114,10 +114,18 @@ export default function RunDetail() {
               >
                 <Text className={`text-xs font-bold ${DOT_INK[s.status]}`}>{i + 1}</Text>
               </View>
-              <Text className="text-callout flex-1 text-base" numberOfLines={1}>
-                {s.tags?.name ?? "Unnamed fountain"}
-              </Text>
-              <Text className="text-muted text-sm">{STATUS_LABEL[s.status]}</Text>
+              {/* Few fountains are named: an unnamed one is just its number
+                  and status. */}
+              {s.tags?.name ? (
+                <>
+                  <Text className="text-callout flex-1 text-base" numberOfLines={1}>
+                    {s.tags.name}
+                  </Text>
+                  <Text className="text-muted text-sm">{STATUS_LABEL[s.status]}</Text>
+                </>
+              ) : (
+                <Text className="text-callout flex-1 text-base">{STATUS_LABEL[s.status]}</Text>
+              )}
             </View>
           ))}
           {added.map((f) => (

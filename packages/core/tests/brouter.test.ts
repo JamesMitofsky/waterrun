@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RouteError, footRoute } from "../src/brouter";
 import { USER_AGENT } from "../src/identity";
+import { haversine, type Pt } from "../src/geo";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -212,64 +213,6 @@ describe("footRoute — turn extraction", () => {
 });
 
 describe("footRoute — errors", () => {
-  it("maps a target-island failure back to the offending waypoint", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi
-        .fn()
-        .mockResolvedValueOnce(
-          new Response("target island detected for section 2", { status: 400 }),
-        ),
-    );
-
-    const points = [A, B, C];
-    const err = await footRoute(points, false).catch((e) => e);
-    expect(err).toBeInstanceOf(RouteError);
-    expect(err.message).toContain("can't be reached on foot");
-    expect(err.island).toEqual({ lat: C.lat, lon: C.lon });
-  });
-
-  it("resolves the island index against the loop-extended sequence", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi
-        .fn()
-        .mockResolvedValueOnce(
-          new Response("target island detected for section 2", { status: 400 }),
-        ),
-    );
-
-    // loop seq = [A, B, A] — section 2 is the appended start.
-    const err = await footRoute([A, B], true).catch((e) => e);
-    expect(err.island).toEqual({ lat: A.lat, lon: A.lon });
-  });
-
-  it("clamps an out-of-range island index to the last waypoint", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi
-        .fn()
-        .mockResolvedValueOnce(
-          new Response("target island detected for section 9", { status: 400 }),
-        ),
-    );
-    const err = await footRoute([A, B], false).catch((e) => e);
-    expect(err.island).toEqual({ lat: B.lat, lon: B.lon });
-  });
-
-  it("treats an island as a route problem, not something to retry", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi
-        .fn()
-        .mockResolvedValueOnce(
-          new Response("target island detected for section 1", { status: 400 }),
-        ),
-    );
-    const err = await footRoute([A, B], false).catch((e) => e);
-    expect(err.retryable).toBe(false);
-  });
-
   it("marks a BRouter 5xx retryable and keeps its short text", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response("boom", { status: 500 })));
     const err = await footRoute([A, B], false).catch((e) => e);
@@ -382,5 +325,125 @@ describe("footRoute — errors", () => {
     const err = await p;
     expect(err).not.toBeInstanceOf(RouteError);
     expect(err.name).toBe("AbortError");
+  });
+});
+
+describe("footRoute — points cut off from the paths", () => {
+  // Waypoints along the equator, ~111 m apart.
+  const P = [0, 1, 2, 3, 4].map((i) => ({ lat: 0, lon: i * 0.001 }));
+
+  // A stand-in for BRouter: routes straight through the waypoints it's sent,
+  // 100 m a leg, unless a waypoint after the first lies within `radiusM` of a
+  // cut-off spot. Then it answers as BRouter does for an island: with the
+  // section (counted from 0) whose target that waypoint is. `when` limits the
+  // islands to some calls (counted from 1). Returns the waypoints of each call.
+  function fakeBrouter(
+    cutOff: Pt[],
+    { radiusM = 1, when = () => true }: { radiusM?: number; when?: (call: number) => boolean } = {},
+  ): Pt[][] {
+    const calls: Pt[][] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const pts = new URL(url).searchParams
+          .get("lonlats")!
+          .split("|")
+          .map((pair) => {
+            const [lon, lat] = pair.split(",").map(Number);
+            return { lat, lon };
+          });
+        calls.push(pts);
+        const idx = pts.findIndex(
+          (p, i) => i > 0 && cutOff.some((c) => haversine(p, c) <= radiusM),
+        );
+        if (idx > 0 && when(calls.length)) {
+          return new Response(`target island detected for section ${idx - 1}`, { status: 400 });
+        }
+        return geojson(
+          pts.map((p) => [p.lon, p.lat]),
+          String((pts.length - 1) * 100),
+        );
+      }),
+    );
+    return calls;
+  }
+
+  // The spot `d` meters from `to`, back towards `from`.
+  const towards = (from: Pt, to: Pt, d: number): Pt => {
+    const gap = haversine(from, to);
+    return {
+      lat: to.lat + ((from.lat - to.lat) * d) / gap,
+      lon: to.lon + ((from.lon - to.lon) * d) / gap,
+    };
+  };
+
+  it("routes the pieces on their own when the whole route couldn't be fitted at once", async () => {
+    const calls = fakeBrouter([P[2]], { when: (n) => n === 1 });
+    const route = await footRoute(P.slice(0, 4), false);
+    // Section 1's target is P[2]: the pieces end at it and start from it.
+    expect(calls).toEqual([P.slice(0, 4), [P[0], P[1]], [P[1], P[2]], [P[2], P[3]]]);
+    expect(route.coords).toEqual(P.slice(0, 4).map((p) => [p.lon, p.lat]));
+    expect(route.distanceM).toBe(300);
+  });
+
+  it("heads for the closest spot the paths reach when a point is cut off", async () => {
+    fakeBrouter([P[2]]);
+    const route = await footRoute(P.slice(0, 4), false);
+    const near = towards(P[1], P[2], 60);
+    expect(route.coords).toHaveLength(4);
+    expect(route.coords[2][0]).toBeCloseTo(near.lon, 9);
+    expect(route.coords[3]).toEqual([P[3].lon, P[3].lat]);
+  });
+
+  it("passes a point by when nothing near it can be reached", async () => {
+    const calls = fakeBrouter([P[2]], { radiusM: 70 });
+    const route = await footRoute(P.slice(0, 4), false);
+    expect(route.coords).toEqual([P[0], P[1], P[3]].map((p) => [p.lon, p.lat]));
+    expect(calls[calls.length - 1]).toEqual([P[1], P[3]]);
+  });
+
+  it("doesn't resend a request that was only the leg into the cut-off point", async () => {
+    const calls = fakeBrouter([P[1]]);
+    const route = await footRoute([P[0], P[1]], false);
+    expect(calls).toHaveLength(2);
+    expect(calls[1][1].lon).toBeCloseTo(towards(P[0], P[1], 60).lon, 9);
+    expect(route.coords).toHaveLength(2);
+  });
+
+  it("keeps a loop's way home when the start was the point it couldn't fit", async () => {
+    const calls = fakeBrouter([P[0]], { when: (n) => n === 1 });
+    const route = await footRoute([P[0], P[1], P[2]], true);
+    expect(calls[0]).toEqual([P[0], P[1], P[2], P[0]]);
+    expect(route.coords[route.coords.length - 1]).toEqual([P[0].lon, P[0].lat]);
+  });
+
+  it("reports the point when the route can't get anywhere near it", async () => {
+    fakeBrouter([P[1]], { radiusM: 70 });
+    const err = await footRoute([P[0], P[1]], false).catch((e) => e);
+    expect(err).toBeInstanceOf(RouteError);
+    expect(err.message).toContain("can't be reached on foot");
+    expect(err.island).toEqual(P[1]);
+    // Changing the route fixes it, not asking again.
+    expect(err.retryable).toBe(false);
+  });
+
+  it("reads an out-of-range section as the last waypoint", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("target island detected for section 9", { status: 400 })),
+    );
+    const err = await footRoute([P[0], P[1]], false).catch((e) => e);
+    expect(err.island).toEqual(P[1]);
+  });
+
+  it("stops working around islands after a bounded number of requests", async () => {
+    // Everything past the first waypoint is cut off.
+    const calls = fakeBrouter([P[0]], { radiusM: 1e6 });
+    const err = await footRoute(P, false).catch((e) => e);
+    expect(err).toBeInstanceOf(RouteError);
+    // The first island BRouter reported (section 0's target), once the
+    // allowance for working around it ran out.
+    expect(err.island).toEqual(P[1]);
+    expect(calls.length).toBeLessThanOrEqual(11);
   });
 });

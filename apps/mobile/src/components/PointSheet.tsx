@@ -135,22 +135,27 @@ type ChoiceButtonProps = {
   box?: string;
   // The label's and icon's color on that fill (see Ink).
   ink?: Ink;
+  // A rarer answer: a standard-height button, so it can't be mistaken for, or
+  // hit instead of, the common one beside it.
+  compact?: boolean;
 };
 
 // A full-width answer, tall enough to hit one-handed mid-run.
-function ChoiceButton({ title, Icon, onPress, box, ink = "light" }: ChoiceButtonProps) {
+function ChoiceButton({ title, Icon, onPress, box, ink = "light", compact }: ChoiceButtonProps) {
   const fg = box ? INK[ink] : { text: "text-red-700", hex: "#b91c1c" };
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={title}
-      className={`flex-row items-center justify-center gap-2 rounded-2xl px-4 py-7 active:opacity-70 ${
-        box ?? "border-2 border-red-600"
-      }`}
+      className={`flex-row items-center justify-center gap-2 rounded-2xl px-4 active:opacity-70 ${
+        compact ? "py-3" : "py-7"
+      } ${box ?? "border-2 border-red-600"}`}
     >
-      <Icon size={28} color={fg.hex} weight="bold" />
-      <Text className={`text-center text-xl font-bold ${fg.text}`}>{title}</Text>
+      <Icon size={compact ? 20 : 28} color={fg.hex} weight="bold" />
+      <Text className={`text-center font-bold ${compact ? "text-base" : "text-xl"} ${fg.text}`}>
+        {title}
+      </Text>
     </Pressable>
   );
 }
@@ -197,9 +202,20 @@ type Props = {
   onUndo?: (edit: PointEdit) => void;
   inRoute?: boolean;
   onToggleRoute?: () => void;
+  // Open on the survey questions even though an edit is on record: the run
+  // stepped back to this stop so it can be answered again.
+  reask?: boolean;
 };
 
-export function PointSheet({ fountain, edit, onAction, onUndo, inRoute, onToggleRoute }: Props) {
+export function PointSheet({
+  fountain,
+  edit,
+  onAction,
+  onUndo,
+  inRoute,
+  onToggleRoute,
+  reask = false,
+}: Props) {
   const tags = fountain.tags ?? {};
   // A point not in OSM yet (run.tsx's add sheet passes id -1, OSM's mark for an
   // object still to be created).
@@ -216,6 +232,9 @@ export function PointSheet({ fountain, edit, onAction, onUndo, inRoute, onToggle
   // An edit was just saved from this sheet, so its card should announce it.
   // A card for an edit from an earlier visit just shows.
   const [justSaved, setJustSaved] = useState(false);
+  // Answering again over the edit on record. The new answer is queued after
+  // the old one, or replaces it while it can still be undone (see submit).
+  const [revising, setRevising] = useState(reask);
 
   const [prevId, setPrevId] = useState(fountain.id);
   if (prevId !== fountain.id) {
@@ -224,6 +243,7 @@ export function PointSheet({ fountain, edit, onAction, onUndo, inRoute, onToggle
     setDetailFor(null);
     setFailure(null);
     setJustSaved(false);
+    setRevising(reask);
   }
 
   // Undo is shown until the edit's hold ends, then goes by itself.
@@ -272,6 +292,7 @@ export function PointSheet({ fountain, edit, onAction, onUndo, inRoute, onToggle
     }
     setDetailFor(null);
     setStep("choose");
+    setRevising(false);
     setJustSaved(true);
   };
 
@@ -298,6 +319,9 @@ export function PointSheet({ fountain, edit, onAction, onUndo, inRoute, onToggle
       ? FORMS[form]
       : null;
 
+  // The survey questions show with no edit on record, or while answering again.
+  const asking = !edit || revising;
+
   // Header: the form's or step's title with a way back, else the fountain.
   const header = isNew
     ? { title: fountainTitle, onBack: undefined }
@@ -309,12 +333,14 @@ export function PointSheet({ fountain, edit, onAction, onUndo, inRoute, onToggle
             setFailure(null);
           },
         }
-      : !edit && step !== "choose"
+      : asking && step !== "choose"
         ? {
             title: STEP_TITLE[step],
             onBack: () => setStep(step === "broken" ? "problem" : "choose"),
           }
-        : { title: fountainTitle, onBack: undefined };
+        : edit && revising
+          ? { title: "Change Answer", onBack: () => setRevising(false) }
+          : { title: fountainTitle, onBack: undefined };
 
   return (
     <View className="gap-4 px-1 py-1">
@@ -358,7 +384,7 @@ export function PointSheet({ fountain, edit, onAction, onUndo, inRoute, onToggle
             <Text className="text-callout font-semibold text-red-700">{failure}</Text>
           ) : null}
         </>
-      ) : edit ? (
+      ) : edit && !revising ? (
         // Keyed on the edit, so a second save from this sheet pops again.
         <PopIn animate={justSaved} trigger={edit.id}>
           <View className="border-border bg-surface-deep gap-2 rounded-2xl border p-4">
@@ -416,6 +442,20 @@ export function PointSheet({ fountain, edit, onAction, onUndo, inRoute, onToggle
                   <Text className="text-action text-sm font-bold">Add Details</Text>
                 </Pressable>
               ) : null}
+              {/* A wrong tap must stay fixable after Undo's few seconds are
+                  up. The new answer is sent after the old one, so it is what
+                  the map ends up with (inside the hold, submit drops the old
+                  one instead). */}
+              <Pressable
+                onPress={() => {
+                  setStep("choose");
+                  setRevising(true);
+                }}
+                accessibilityRole="button"
+                hitSlop={12}
+              >
+                <Text className="text-action text-sm font-bold">Change Answer</Text>
+              </Pressable>
             </View>
             {edit.changesetUrl ? (
               <Pressable
@@ -443,7 +483,9 @@ export function PointSheet({ fountain, edit, onAction, onUndo, inRoute, onToggle
         </PopIn>
       ) : (
         <View className="gap-4 py-1">
-          {statusLine && step === "choose" ? (
+          {/* What the map said before this visit; while answering again it
+              would contradict the answer on record. */}
+          {statusLine && step === "choose" && !revising ? (
             <Text className="text-muted text-callout">{statusLine}</Text>
           ) : null}
           {step === "choose" ? (
@@ -454,25 +496,30 @@ export function PointSheet({ fountain, edit, onAction, onUndo, inRoute, onToggle
                 box="bg-green-600"
                 onPress={answerWorking}
               />
+              {/* Purple: a hue none of the answers behind it (red, orange,
+                  amber) use, so this step and the next never look alike. */}
               <ChoiceButton
                 title="Problem"
                 Icon={WarningIcon}
-                box="bg-orange-600"
+                box="bg-violet-700"
                 onPress={() => setStep("problem")}
               />
             </>
           ) : step === "problem" ? (
             <>
-              <ChoiceButton
-                title="No Fountain"
-                Icon={TrashIcon}
-                onPress={() => setDetailFor("removed")}
-              />
+              {/* Broken is the usual answer, so it leads at full size; No
+                  Fountain is rarer and sits under it, smaller. */}
               <ChoiceButton
                 title="Broken"
                 Icon={WrenchIcon}
                 box="bg-orange-600"
                 onPress={() => setStep("broken")}
+              />
+              <ChoiceButton
+                title="No Fountain"
+                Icon={TrashIcon}
+                compact
+                onPress={() => setDetailFor("removed")}
               />
             </>
           ) : (

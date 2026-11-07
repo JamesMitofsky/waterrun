@@ -269,8 +269,10 @@ export default function RunScreen() {
                         className="h-2.5 w-2.5 rounded-full"
                         style={{ backgroundColor: STATUS_COLOR[st.status] }}
                       />
+                      {/* Few fountains are named; the rest go by their stop
+                          number, the one their map marker shows. */}
                       <Text className="text-light text-callout flex-1" numberOfLines={1}>
-                        {st.tags?.name ?? "Unnamed fountain"}
+                        {st.tags?.name ?? `Stop ${s.stops.indexOf(st) + 1}`}
                       </Text>
                       <Text className="text-light-muted text-sm">{STATUS_LABEL[st.status]}</Text>
                     </View>
@@ -450,6 +452,9 @@ export default function RunScreen() {
           <PointSheet
             fountain={selectedPoint}
             edit={selectedEdit}
+            // A stop set back to pending (Back) is there to be answered again,
+            // so the questions show rather than the answer on record.
+            reask={"status" in selectedPoint && selectedPoint.status === "pending"}
             onAction={(action, extras) => {
               s.recordFor(selectedPoint, action, extras);
               setSelectedId(null);

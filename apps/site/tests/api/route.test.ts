@@ -122,13 +122,10 @@ describe("POST /api/route", () => {
   });
 
   it("answers 502 with the unreachable point for a target island", async () => {
+    // Every request is cut off at B, so footRoute can't route around it.
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockResolvedValueOnce(
-          new Response("target island detected for section 1", { status: 400 }),
-        ),
+      vi.fn(async () => new Response("target island detected for section 0", { status: 400 })),
     );
 
     const r = await post({ points: [A, B], loop: false });
