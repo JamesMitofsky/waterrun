@@ -1,34 +1,42 @@
 import { lastCheckedMs } from "@water-run/core/checkDate";
+import { isOutOfService } from "@water-run/core/fountainFilters";
 
 // Freshness of a fountain's last on-the-ground verification. Never-checked folds
-// into "very stale" — the point that most needs a runner to visit.
-export type Bucket = "fresh" | "stale" | "very_stale";
+// into "stale" — the point that most needs a runner to visit.
+export type Bucket = "fresh" | "stale";
 
 export const BUCKET_COLOR: Record<Bucket, string> = {
   fresh: "#10b981", // emerald
   stale: "#f59e0b", // amber
-  very_stale: "#f43f5e", // rose
 };
 
 export const BUCKET_LABEL: Record<Bucket, string> = {
   fresh: "<1y",
-  stale: "1–3y",
-  very_stale: ">3y",
+  stale: ">1y",
 };
 
-export const BUCKET_ORDER = ["fresh", "stale", "very_stale"] as const;
+export const BUCKET_ORDER = ["fresh", "stale"] as const;
+
+// An out-of-service point confirmed within the last year is settled, not
+// actionable, so the map grays it out instead of painting it green. The color
+// matches the one MapView gives a `dimmed` marker.
+export const RETIRED_COLOR = "#9ca3af"; // gray
+export const RETIRED_LABEL = "Out of service, <1y";
 
 const MONTH_MS = 30 * 24 * 60 * 60 * 1000;
 const FRESH_CUTOFF = 12 * MONTH_MS; // checked within a year
-const STALE_CUTOFF = 36 * MONTH_MS; // checked within three years
 
 // Grade a point by how long ago it was last verified. `nowMs` is passed in so
 // the caller owns the clock (pure across re-renders / testable).
 export function bucketOf(tags: Record<string, string>, nowMs: number): Bucket {
   const checked = lastCheckedMs(tags);
-  if (checked == null) return "very_stale";
-  const age = nowMs - checked;
-  if (age <= FRESH_CUTOFF) return "fresh";
-  if (age <= STALE_CUTOFF) return "stale";
-  return "very_stale";
+  if (checked == null) return "stale";
+  return nowMs - checked <= FRESH_CUTOFF ? "fresh" : "stale";
+}
+
+// True for the gray dots: out of service, and confirmed so within the last
+// year. An out-of-service point checked longer ago than that stays amber — it
+// may have been repaired since, so it still wants a visit.
+export function isRetired(tags: Record<string, string>, nowMs: number): boolean {
+  return isOutOfService(tags) && bucketOf(tags, nowMs) === "fresh";
 }

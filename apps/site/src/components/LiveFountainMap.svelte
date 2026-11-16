@@ -1,11 +1,10 @@
 <script lang="ts">
   import MapView, { type MapMarker } from "@/components/MapView.svelte";
-  import { BUCKET_COLOR, bucketOf } from "@/lib/freshness";
+  import { BUCKET_COLOR, bucketOf, isRetired } from "@/lib/freshness";
   import FountainPopup from "@/components/fountains/FountainPopup.svelte";
   import SearchProgress, { type LoadingStep } from "@/components/fountains/SearchProgress.svelte";
   import ErrorNotice from "@/components/ErrorNotice.svelte";
   import type { Fountain } from "@water-run/core/schemas";
-  import { isOutOfService } from "@water-run/core/fountainFilters";
   import { fetchRegionFountains, fountainLoadErrorMessage } from "@/lib/regionFountains";
   import { haversine } from "@water-run/core/geo";
   import { dataAgeNotice } from "@water-run/core/dataAge";
@@ -111,7 +110,7 @@
       lat: f.lat,
       lon: f.lon,
       color: BUCKET_COLOR[bucket],
-      dimmed: isOutOfService(f.tags),
+      dimmed: isRetired(f.tags, nowMs),
       data: { f },
     })),
   );
