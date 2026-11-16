@@ -2,6 +2,7 @@
   import type { Snippet } from "svelte";
   import type * as maplibregl from "maplibre-gl";
   import { ROUTE_LINE, START_FLAG } from "@/lib/basemap/routeLine";
+  import { markerGlyphImageId, type MarkerGlyph } from "@/lib/markerGlyph";
 
   export type MapMarker = {
     id: number | string;
@@ -11,6 +12,9 @@
     label?: string;
     // Render at reduced opacity — used for context-only points.
     dimmed?: boolean;
+    // A small white mark drawn over the dot (see markerGlyph.ts), so its
+    // meaning does not rest on colour alone.
+    glyph?: MarkerGlyph;
     // Fired when the marker is tapped and no `markerPopup` is supplied.
     onClick?: () => void;
     // Arbitrary payload the `markerPopup` snippet reads to render its content.
@@ -35,6 +39,7 @@
 
   const MARKERS_SOURCE = "markers";
   const MARKERS_LAYER = "markers-circle";
+  const MARKER_GLYPHS_LAYER = "markers-glyph";
   const RUNNER_SOURCE = "runner";
   const RUNNER_LAYER = "runner-circle";
   // The runner dot: the line's own blue, ringed in white like the stops but
@@ -154,7 +159,13 @@
       features: markers.map((m) => ({
         type: "Feature",
         geometry: { type: "Point", coordinates: [m.lon, m.lat] },
-        properties: { mid: String(m.id), color: m.color, dimmed: !!m.dimmed },
+        properties: {
+          mid: String(m.id),
+          color: m.color,
+          dimmed: !!m.dimmed,
+          // Left off when there is none, so the glyph layer's filter skips it.
+          ...(m.glyph && { glyphImage: markerGlyphImageId(m.glyph) }),
+        },
       })),
     };
   }
@@ -237,6 +248,7 @@
     GeoJSONSource,
     CircleLayer,
     LineLayer,
+    SymbolLayer,
     Marker,
     Popup,
     AttributionControl,
@@ -245,6 +257,7 @@
     FullScreenControl,
   } from "svelte-maplibre-gl";
   import { PLACE_DOT_ID, placeDotImage } from "@/lib/basemap/placeDot";
+  import { MARKER_GLYPH_BOX_PX, markerGlyphImage, markerGlyphOfImageId } from "@/lib/markerGlyph";
   import { setMapPopup } from "@/lib/mapPopup";
   import { isFatalMapError, type MapFailure } from "@/lib/mapFailure";
   import { nearestTo, tapSlopPx } from "@/lib/mapTap";
@@ -1167,13 +1180,19 @@
     if (map?.isStyleLoaded()) signalReady();
   }
 
-  // The style names one image the sprite does not have, the city dot, and it
-  // is drawn in code (see placeDot.ts). MapLibre asks for it here the first
-  // time a tile needs it, and uses what the listener adds.
+  // Images the sprite does not have are drawn in code: the city dot the style
+  // names (see placeDot.ts) and the marks on our own dots (see
+  // markerGlyph.ts). MapLibre asks for each here the first time something
+  // needs it, and uses what the listener adds.
   function handleImageMissing(ev: maplibregl.MapStyleImageMissingEvent) {
     const mapInst = ev.target;
-    if (ev.id !== PLACE_DOT_ID || mapInst.hasImage(ev.id)) return;
-    mapInst.addImage(ev.id, placeDotImage(), { sdf: true });
+    if (mapInst.hasImage(ev.id)) return;
+    if (ev.id === PLACE_DOT_ID) {
+      mapInst.addImage(ev.id, placeDotImage(), { sdf: true });
+      return;
+    }
+    const glyph = markerGlyphOfImageId(ev.id);
+    if (glyph) mapInst.addImage(ev.id, markerGlyphImage(glyph), { sdf: true });
   }
 
   function handleClick(ev: maplibregl.MapMouseEvent) {
@@ -1402,6 +1421,24 @@
           }}
           onmouseenter={() => interactive && setCursor("pointer")}
           onmouseleave={() => setCursor("")}
+        />
+        <!-- The marks on the dots. Sized from `radius`, so they pop in with
+             their dots, and exempt from label collision: a mark belongs to its
+             dot and must not vanish because a neighbour or a street name is
+             close. Taps are still read off the circle layer alone. -->
+        <SymbolLayer
+          id={MARKER_GLYPHS_LAYER}
+          filter={["has", "glyphImage"]}
+          layout={{
+            "icon-image": ["get", "glyphImage"],
+            "icon-size": (radius * 2) / MARKER_GLYPH_BOX_PX,
+            "icon-allow-overlap": true,
+            "icon-ignore-placement": true,
+          }}
+          paint={{
+            "icon-color": "#fff",
+            "icon-opacity": ["case", ["get", "dimmed"], 0.45, 1],
+          }}
         />
       </GeoJSONSource>
 

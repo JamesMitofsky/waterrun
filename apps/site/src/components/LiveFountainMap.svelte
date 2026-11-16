@@ -1,6 +1,6 @@
 <script lang="ts">
   import MapView, { type MapMarker } from "@/components/MapView.svelte";
-  import { BUCKET_COLOR, bucketOf, isRetired } from "@/lib/freshness";
+  import { BUCKET_COLOR, BUCKET_GLYPH, bucketOf } from "@/lib/freshness";
   import FountainPopup from "@/components/fountains/FountainPopup.svelte";
   import SearchProgress, { type LoadingStep } from "@/components/fountains/SearchProgress.svelte";
   import ErrorNotice from "@/components/ErrorNotice.svelte";
@@ -10,8 +10,8 @@
   import { dataAgeNotice } from "@water-run/core/dataAge";
 
   // Live counterpart to DemoRunMap: every drinking-water point in a fixed area
-  // around central DC, colored by how recently it was verified. Read-only; no
-  // editing.
+  // around central DC, colored by how recently it was verified and whether it
+  // works. Read-only; no editing.
   let { class: className = "" }: { class?: string } = $props();
 
   // Hard client-side ceiling for the fountain fetch. The server gives up on
@@ -110,7 +110,7 @@
       lat: f.lat,
       lon: f.lon,
       color: BUCKET_COLOR[bucket],
-      dimmed: isRetired(f.tags, nowMs),
+      glyph: BUCKET_GLYPH[bucket],
       data: { f },
     })),
   );
