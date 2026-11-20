@@ -4,7 +4,6 @@ import DemoRunMap from "@/components/DemoRunMap.svelte";
 import DemoRoutePlaceholder from "@/components/DemoRoutePlaceholder.astro";
 import MapAssets from "@/components/MapAssets.astro";
 import MapFrame from "@/components/MapFrame.astro";
-import Footer from "@/components/Footer.astro";
 // The handwritten headline is one flat ink over a textured alpha, so it ships
 // as an alpha mask (hand-authored, see scripts/build-header-assets.ts) that
 // CSS fills with `hero-ink`. Inlined: it is the LCP element and sits inside
@@ -289,8 +288,12 @@ const mobileBottomBand = bandPath(mobileBottomWave, "bottom");
       </div>
     </div>
 
-    {/* THE SOLUTION */}
-    <section>
+    {
+      /* THE SOLUTION. The page's last section, so it holds the gap above the
+        footer (which Layout mounts after `<main>`): on the section, not the
+        `.reveal` block, so the space is there before the block fades in. */
+    }
+    <section class="pb-20 md:pb-28">
       <div class="reveal mx-auto max-w-3xl px-5 pt-20 pb-2 md:pt-28">
         <h2
           class="font-hero text-hero text-[clamp(2.5rem,5vw,3.4rem)] leading-[1.05] tracking-tight"
@@ -311,9 +314,6 @@ const mobileBottomBand = bandPath(mobileBottomWave, "bottom");
         </p>
       </div>
     </section>
-
-    {/* FOOTER */}
-    <Footer />
   </main>
 
   {

@@ -1,6 +1,7 @@
 ---
 import "@/styles/globals.css";
 import MobileNav from "@/components/MobileNav.svelte";
+import Footer from "@/components/Footer.astro";
 // Brand mark, inlined: every page is a fresh document, and a `public/` image
 // is re-validated on each load (`max-age=0`), so as a request it painted a
 // beat after the header text and popped in. Derived by scripts/build-header-assets.ts.
@@ -29,6 +30,7 @@ interface Props {
    * viewport tall, the header keeps its own height, and the page's `<main>`
    * takes the rest. Page-level scrolling is off — the page's content owns its
    * box. For pages that are one full-bleed surface, like the live map.
+   * Such a page has no footer: there is no page below the surface to hold one.
    *
    * Sized with `h-dvh`, not `h-full`: the html element's 100% is the layout
    * viewport, which on phones does not track the browser chrome sliding away,
@@ -241,6 +243,12 @@ const ogImage = new URL("/opengraph-image.jpg", Astro.site).href;
       </div>
     </header>
     <slot />
+    {
+      /* Every scrolling page ends on the footer, which carries the policy and
+        support links App Store Connect points at. Outside the page's `<main>`,
+        so it is the document's contentinfo landmark. */
+    }
+    {!fullscreen && <Footer />}
     <script>
       // Fallback nav fade for engines without cross-document view transitions
       // (Gecko, as of Firefox 154 — see the @view-transition block in

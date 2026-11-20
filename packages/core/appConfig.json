@@ -4,6 +4,7 @@
   "appTagline": "Verified public drinking fountains",
   "scheme": "waterrun",
   "apiBase": "https://waterrun.app",
+  "supportEmail": "hey@waterrun.app",
   "appStoreUrl": "",
   "nativeBackground": "#0c0d0a",
   "pwaThemeColor": "#f4f6f8",

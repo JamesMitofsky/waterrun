@@ -8,6 +8,9 @@ export const PWA_THEME_COLOR = cfg.pwaThemeColor;
 // The mobile app's deep-link scheme. Native OSM sign-in hands the token back
 // through it, so it must be the one the app registers.
 export const SCHEME = cfg.scheme;
+// Where people reach the operator: the support page, the privacy policy and the
+// terms all name it, and App Store Connect's Support URL points at the first.
+export const SUPPORT_EMAIL = cfg.supportEmail;
 // Store/download link for the mobile app. Empty until the app is published —
 // fill in the App Store / Play Store URL here (single source in appConfig.json).
 export const APP_STORE_URL = cfg.appStoreUrl || "#";

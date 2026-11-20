@@ -1,43 +1,19 @@
 ---
-// Site footer. Lives as its own component because every page will want it —
-// index is just the first to mount it.
+// Site footer. Layout.astro mounts it under every page except the fullscreen
+// ones (the live map), which are one viewport-tall surface with no page below.
 import HeartIcon from "@/components/icons/HeartIcon.svelte";
 // Same inlined mark as the header (see Layout.astro): a `public/` image is
 // re-validated on every load, and the footer's copy would land before it.
 import logoSrc from "@/assets/logo-144.png?inline";
 import { APP_NAME } from "@/lib/appConfig";
-
-const REPO_URL = "https://github.com/JamesMitofsky/waterrun";
-
-// One shape for both columns so the markup below stays a loop rather than two
-// hand-kept lists. `external` decides target/rel, not styling.
-const columns: {
-  heading: string;
-  links: { label: string; href: string; external?: boolean }[];
-}[] = [
-  {
-    heading: "Explore",
-    links: [
-      { label: "Home", href: "/" },
-      { label: "Fountain map", href: "/public-drinking-fountains" },
-      { label: "Join the waitlist", href: "/waitlist" },
-    ],
-  },
-  {
-    heading: "Project",
-    links: [
-      { label: "Contribute on GitHub", href: REPO_URL, external: true },
-      { label: "Share feedback", href: "/feedback" },
-    ],
-  },
-];
+import { FOOTER_COLUMNS, POLICY_LINKS } from "@/lib/siteLinks";
 ---
 
 {
-  /* Own top margin, so a page only has to drop `<Footer />` after its last
-    section to get the same breathing room. */
+  /* No top margin: the footer follows the page's `<main>`, and each page pads
+    its own last section, so the gap above is the page's to set. */
 }
-<footer class="bg-surface-deep border-border mt-20 border-t md:mt-28">
+<footer class="bg-surface-deep border-border border-t">
   <div class="mx-auto max-w-6xl px-5 py-10 md:py-12">
     <div class="grid gap-8 sm:grid-cols-2 md:grid-cols-[1.6fr_1fr_1fr] md:gap-12">
       {/* Brand block: mark, then what this is in one line. */}
@@ -51,7 +27,7 @@ const columns: {
       </div>
 
       {
-        columns.map((column) => (
+        FOOTER_COLUMNS.map((column) => (
           <nav aria-labelledby={`footer-${column.heading.toLowerCase()}`}>
             <h2 id={`footer-${column.heading.toLowerCase()}`} class="font-hero text-[1.05rem]">
               {column.heading}
@@ -75,8 +51,13 @@ const columns: {
       }
     </div>
 
-    {/* Byline strip. */}
-    <div class="border-border text-muted mt-8 border-t pt-5 text-sm">
+    {
+      /* Byline, then the policy links App Store Connect points at. Side by side
+        from `sm` up, stacked below it. */
+    }
+    <div
+      class="border-border text-muted mt-8 flex flex-col gap-3 border-t pt-5 text-sm sm:flex-row sm:items-center sm:justify-between"
+    >
       <p>
         Hydrated with <HeartIcon size={14} class="text-blue inline-block align-[-2px]" /><span
           class="sr-only">love</span
@@ -90,6 +71,20 @@ const columns: {
           James Mitofsky
         </a>
       </p>
+      <nav aria-label="Policies and support">
+        <ul class="flex flex-wrap items-center gap-x-3 gap-y-1">
+          {
+            POLICY_LINKS.map((link, i) => (
+              <li class="flex items-center gap-x-3">
+                {i > 0 && <span aria-hidden="true">·</span>}
+                <a href={link.href} class="footer-link">
+                  {link.label}
+                </a>
+              </li>
+            ))
+          }
+        </ul>
+      </nav>
     </div>
   </div>
 </footer>

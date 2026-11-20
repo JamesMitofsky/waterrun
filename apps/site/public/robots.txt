@@ -1,6 +1,9 @@
-# /about and /feedback are unlisted: reachable by link, kept out of search
+# /about, /feedback and the two policies are unlisted: reachable by link
+# (the policies from the footer and App Store Connect), kept out of search
 # results. Disallow stops crawlers fetching them; each page also sends a
 # noindex meta for any crawler that reaches it anyway.
 User-agent: *
 Disallow: /about
 Disallow: /feedback
+Disallow: /privacy-policy
+Disallow: /terms-of-service

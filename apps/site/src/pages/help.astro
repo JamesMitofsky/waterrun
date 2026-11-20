@@ -1,0 +1,76 @@
+---
+import ContentPage from "@/layouts/ContentPage.astro";
+import DocSection from "@/components/DocSection.astro";
+import { APP_NAME, SUPPORT_EMAIL } from "@/lib/appConfig";
+import { REPO_URL } from "@/lib/siteLinks";
+
+export const prerender = true;
+---
+
+{
+  /* App Store Connect's Support URL. Indexed, unlike the policies: someone
+    searching for help with the app should land here. The answers below name
+    the app's own screens and buttons — keep them in step with apps/mobile. */
+}
+<ContentPage
+  title={`Support — ${APP_NAME}`}
+  description={`Get help with ${APP_NAME}: answers to common questions and how to reach me.`}
+  heading="Support"
+>
+  <p class="text-muted mt-6 text-lg leading-relaxed">
+    Stuck on something, found a bug, or have an idea? Here are the quickest ways to get help with{
+      " "
+    }
+    {APP_NAME}.
+  </p>
+
+  <DocSection heading="Contact me">
+    <p>
+      The fastest way to reach me is email. Write to{" "}
+      <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a> and include what you were doing, what you
+      expected, and what happened instead. Screenshots help.
+    </p>
+  </DocSection>
+
+  <DocSection heading="Report a bug or suggest a feature">
+    <p>
+      Use the <a href="/feedback">feedback form</a>, or email me. If you're comfortable with GitHub,
+      you can also <a href={`${REPO_URL}/issues`}>open an issue</a> on the project.
+    </p>
+  </DocSection>
+
+  <DocSection heading="Common questions">
+    <h3>Why do I need to sign in?</h3>
+    <p>
+      {APP_NAME} saves fountain updates to OpenStreetMap, the free public map anyone can use, so they
+      help everyone and not just you. Signing in with a free OpenStreetMap account lets {APP_NAME} send
+      them. You can plan and run without signing in: your updates stay on your phone until you do.
+    </p>
+
+    <h3>My updates haven't shown up yet.</h3>
+    <p>
+      Updates are sent once you're signed in and online. Until then, Profile shows how many are
+      waiting. Once they're sent, they can take a little while to appear for everyone else.
+    </p>
+
+    <h3>Guidance stops when my screen locks.</h3>
+    <p>
+      {APP_NAME} needs your location to guide a run. In Settings › {APP_NAME} › Location, choose While
+      Using the App and turn on Precise Location. Once a run has started, the app keeps guiding you with
+      the screen locked until the run ends.
+    </p>
+
+    <h3>A fountain on the map is wrong.</h3>
+    <p>
+      Open it on the map and record what you found, such as Out of Order. If a fountain is missing
+      entirely, stand next to it, open Nearby and choose Add a fountain here.
+    </p>
+
+    <h3>How do I sign out or delete my data?</h3>
+    <p>
+      Go to Profile › Sign Out. Deleting the app removes your run history and anything else it
+      stored on your phone. The <a href="/privacy-policy#your-choices">Privacy Policy</a> covers every
+      option, including your OpenStreetMap account.
+    </p>
+  </DocSection>
+</ContentPage>

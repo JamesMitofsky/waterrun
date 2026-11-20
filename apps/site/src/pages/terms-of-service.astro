@@ -1,0 +1,181 @@
+---
+import ContentPage from "@/layouts/ContentPage.astro";
+import DocSection from "@/components/DocSection.astro";
+import { APP_NAME, SUPPORT_EMAIL } from "@/lib/appConfig";
+
+export const prerender = true;
+
+// Bump when the terms' substance changes; "Changes to these terms" promises it.
+const EFFECTIVE = "November 10, 2026";
+---
+
+{
+  /* Unlisted like /privacy-policy: linked from the footer, kept out of search
+    results. public/robots.txt disallows the fetch. */
+}
+<ContentPage
+  title={`Terms of Service — ${APP_NAME}`}
+  description={`The terms for using the ${APP_NAME} app and website.`}
+  heading="Terms of Service"
+  noindex
+>
+  <p class="text-muted mt-4 text-sm">Effective {EFFECTIVE}</p>
+
+  <div class="text-muted mt-6 text-lg leading-relaxed">
+    <p>
+      Welcome to {APP_NAME}. These terms cover your use of the {APP_NAME} app and the website at{
+        " "
+      }
+      <a href="https://waterrun.app" class="underline underline-offset-4">waterrun.app</a>, both run
+      by me, James Mitofsky. By using {APP_NAME}, you agree to them. If you don't agree, please
+      don't use it.
+    </p>
+  </div>
+
+  <DocSection heading={`Using ${APP_NAME}`}>
+    <p>
+      {APP_NAME} is free to use. You may use the app and the website for your own, non-commercial purposes,
+      subject to these terms. How {APP_NAME} handles your information is explained in the{" "}
+      <a href="/privacy-policy">Privacy Policy</a>.
+    </p>
+  </DocSection>
+
+  <DocSection heading="Your safety comes first">
+    <ul>
+      <li>
+        Fountain information is gathered by the community and may be out of date or wrong. A
+        fountain shown as working may be broken, gone, or switched off for the season. Don't count
+        on finding water: carry what you need.
+      </li>
+      <li>
+        {APP_NAME} doesn't test water quality. Use your own judgement before drinking from any fountain.
+      </li>
+      <li>
+        Routes are planned automatically and may cross busy roads, closed paths or private land.
+        Follow traffic laws and local rules, stay aware of your surroundings, and don't look at your
+        phone while crossing a street.
+      </li>
+      <li>
+        Running is physical exercise. Run within your limits, and talk to a doctor if you're unsure
+        whether it's safe for you.
+      </li>
+    </ul>
+  </DocSection>
+
+  <DocSection heading="Your contributions">
+    <p>
+      The fountain updates you send are published to OpenStreetMap, the free public map {APP_NAME}'s
+      fountain data lives on, under your own OpenStreetMap account. They're governed by
+      OpenStreetMap's{" "}
+      <a href="https://osmfoundation.org/wiki/Licence/Contributor_Terms">contributor terms</a> and made
+      available under the{" "}
+      <a href="https://opendatacommons.org/licenses/odbl/">Open Database License</a>. I don't claim
+      ownership of them.
+    </p>
+    <p>
+      You're responsible for what you send. Report only what you've seen for yourself, and don't
+      include personal information about yourself or anyone else in notes.
+    </p>
+  </DocSection>
+
+  <DocSection heading="Your OpenStreetMap account">
+    <p>
+      Signing in uses your OpenStreetMap account, which is provided by the OpenStreetMap Foundation
+      under its own{" "}
+      <a href="https://osmfoundation.org/wiki/Terms_of_Use">terms of use</a>. Keep your account
+      secure; you're responsible for what's sent under it.
+    </p>
+  </DocSection>
+
+  <DocSection heading="Acceptable use">
+    <p>You agree not to:</p>
+    <ul>
+      <li>send false, misleading or deliberately damaging updates to the map;</li>
+      <li>
+        send automated or bulk requests to {APP_NAME}'s servers, or use them for anything other than{
+          " "
+        }
+        {APP_NAME} itself;
+      </li>
+      <li>
+        interfere with, overload, or try to get around the limits of {APP_NAME} or its servers;
+      </li>
+      <li>harass anyone or cause distress to anyone in connection with {APP_NAME};</li>
+      <li>use {APP_NAME} for anything unlawful.</li>
+    </ul>
+    <p>
+      I may block access for anyone who breaks these rules, to protect {APP_NAME} and the people who use
+      it.
+    </p>
+  </DocSection>
+
+  <DocSection heading="Ownership">
+    <p>
+      The {APP_NAME} name, logo, design and text belong to James Mitofsky. All rights are reserved, except
+      where stated otherwise. Map data is ©{" "}
+      <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>, available
+      under the Open Database License.
+    </p>
+  </DocSection>
+
+  <DocSection heading={`Services ${APP_NAME} relies on`}>
+    <p>
+      {APP_NAME} depends on services run by others, including OpenStreetMap, volunteer-run map data and
+      route planning servers, and map image providers. I don't control them and can't promise they'll
+      always be available or accurate. Their own terms apply to your use of them.
+    </p>
+  </DocSection>
+
+  <DocSection heading="Changes and availability">
+    <p>
+      I may change, suspend or stop any part of {APP_NAME} at any time, with or without notice. You can
+      stop using it at any time: sign out and delete the app.
+    </p>
+  </DocSection>
+
+  <DocSection heading="No warranties">
+    <p>
+      {APP_NAME} is provided "as is", without any representations or warranties, express or implied. I
+      make no representations or warranties about {APP_NAME} or the information and materials it provides,
+      including that fountain information is accurate, complete or current, or that routes are safe or
+      passable.
+    </p>
+  </DocSection>
+
+  <DocSection heading="Limitation of liability">
+    <p>
+      To the fullest extent the law allows, James Mitofsky won't be liable to you for any indirect,
+      special or consequential loss, or for any loss of revenue, income, profits or anticipated
+      savings, arising from your use of {APP_NAME} or in connection with it, including relying on its
+      fountain information or routes.
+    </p>
+  </DocSection>
+
+  <DocSection heading="Links">
+    <p>
+      {APP_NAME} links to other websites. I'm not responsible for their contents, and a link doesn't mean
+      I endorse the site. Use them at your own risk.
+    </p>
+  </DocSection>
+
+  <DocSection heading="Changes to these terms">
+    <p>
+      I may revise these terms at any time by posting a new version on this page, with a new
+      effective date. By continuing to use {APP_NAME} after a change, you agree to the revised terms.
+    </p>
+  </DocSection>
+
+  <DocSection heading="Governing law">
+    <p>
+      These terms are governed by and construed in accordance with the laws of the United States,
+      and you irrevocably submit to the exclusive jurisdiction of the courts located there.
+    </p>
+  </DocSection>
+
+  <DocSection heading="Contact">
+    <p>
+      If you have any questions about these terms, email me at{" "}
+      <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>.
+    </p>
+  </DocSection>
+</ContentPage>

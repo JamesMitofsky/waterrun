@@ -1,0 +1,37 @@
+---
+// One headed section of a long-form text page (the privacy policy, the terms,
+// support). The pages are mostly prose, so the type rules for what goes inside —
+// paragraphs, lists, sub-questions, links — live here once instead of as a
+// class on every element of every page. Put this inside a `ContentPage`.
+interface Props {
+  heading: string;
+  /**
+   * The section's anchor, so another page can link straight to it
+   * (`/privacy-policy#your-choices`). Defaults to the heading, slugified.
+   */
+  id?: string;
+}
+
+const { heading, id } = Astro.props;
+const anchor =
+  id ??
+  heading
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+---
+
+{
+  /* `scroll-mt` keeps an anchored heading off the very top edge when the page
+    is opened at it. Links take the house link colour from globals.css; the
+    underline is added here because in running text colour alone is too faint
+    a cue. */
+}
+<section id={anchor} class="mt-12 scroll-mt-8">
+  <h2 class="font-hero text-2xl leading-tight">{heading}</h2>
+  <div
+    class="text-muted leading-relaxed [&_a]:underline [&_a]:underline-offset-4 [&_h3]:mt-6 [&_h3]:text-base [&_h3]:font-semibold [&_li]:mt-2 [&_p]:mt-4 [&_strong]:text-base [&_strong]:font-semibold [&_ul]:mt-4 [&_ul]:list-disc [&_ul]:pl-5"
+  >
+    <slot />
+  </div>
+</section>

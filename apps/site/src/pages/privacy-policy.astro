@@ -1,0 +1,309 @@
+---
+import ContentPage from "@/layouts/ContentPage.astro";
+import DocSection from "@/components/DocSection.astro";
+import { APP_NAME, SUPPORT_EMAIL } from "@/lib/appConfig";
+
+export const prerender = true;
+
+// Bump when the policy's substance changes; "Changes to this policy" promises it.
+const EFFECTIVE = "November 10, 2026";
+---
+
+{
+  /* Unlisted like /about: linked from the footer and from App Store Connect,
+    kept out of search results. public/robots.txt disallows the fetch. Every
+    claim below is about what the code does today — check the data flows
+    (apps/mobile, apps/site/src/pages/api) before changing one. */
+}
+<ContentPage
+  title={`Privacy Policy — ${APP_NAME}`}
+  description={`What ${APP_NAME} collects, why, who receives it, and how to delete it.`}
+  heading="Privacy Policy"
+  noindex
+>
+  <p class="text-muted mt-4 text-sm">Effective {EFFECTIVE}</p>
+
+  <div class="text-muted mt-6 text-lg leading-relaxed">
+    <p>
+      I'm James Mitofsky, and I run {APP_NAME}: the {APP_NAME} app for iPhone and the website at{
+        " "
+      }
+      <a href="https://waterrun.app" class="underline underline-offset-4">waterrun.app</a>. This
+      policy explains what information {APP_NAME} handles, how it gets it, what it's used for, who else
+      receives it, how long it's kept, and how you can withdraw your consent or have it deleted.
+    </p>
+    <p class="mt-4">
+      The short version: {APP_NAME} has no accounts of its own, no ads, no analytics and no tracking.
+      Your location is used only to find fountains, guide your runs and place the fountains you add. I
+      never sell your information.
+    </p>
+  </div>
+
+  <DocSection heading={`What ${APP_NAME} collects`}>
+    <h3>Your location</h3>
+    <p>
+      The app uses your device's precise location to show where you are on the map, find fountains
+      near you, plan a route from where you're standing, and guide you to each fountain. It asks for
+      permission first. During a run it keeps using your location while the screen is locked, so
+      guidance and your progress keep going; that stops when the run ends. The app doesn't use your
+      location in the background at any other time.
+    </p>
+    <p>
+      To find fountains and plan routes, the app sends {APP_NAME}'s server the area you're searching
+      and the stops on your route, which usually begin at your location. The server uses them to
+      answer that request and doesn't store them. If you add a new fountain, its position (usually
+      where you're standing) is published to the map with the fountain.
+    </p>
+    <p>
+      On the website, the map's locate button asks your browser for your location to centre the map
+      on you. The site then asks its server for the fountains in the area on screen.
+    </p>
+
+    <h3>Your OpenStreetMap sign-in</h3>
+    <p>
+      {APP_NAME}'s fountain data lives on OpenStreetMap, the free public map anyone can use and
+      edit. To send fountain updates you sign in with an OpenStreetMap account, on openstreetmap.org
+      itself, so {APP_NAME} never sees your password. Signing in gives {APP_NAME} a key that lets it read
+      your account details and send map edits on your behalf. Of those details, {APP_NAME} uses only your
+      username, profile picture, number of contributions and the date you joined, to show them in the
+      app. The key gives no access to your email address or your messages.
+    </p>
+    <p>
+      In the app, that key is kept in your device's secure keychain. On the website, it's kept in a
+      secure cookie that page scripts can't read. With each request, {APP_NAME}'s server passes the
+      key on to OpenStreetMap; it doesn't store the key or your account details.
+    </p>
+
+    <h3>The fountain updates you send</h3>
+    <p>
+      When you report a fountain as working, partially working, out of order or removed, describe it
+      (who it serves, how it dispenses water, whether it's seasonal), write a note on it, or add a
+      new fountain, that update is published to OpenStreetMap under your OpenStreetMap account, with
+      the time and a mark saying it was made with {APP_NAME}. <strong>Updates are public:</strong> anyone
+      can see them and which account made them, and they stay in the map's public edit history. Please
+      don't put personal information in notes.
+    </p>
+    <p>
+      {APP_NAME}'s server keeps two small records of each update it sends: a log entry saying which
+      fountain changed, how, and the edit's public reference number; and a copy of the updated
+      fountain for about a day, so the change shows on {APP_NAME}'s map before the public map data
+      catches up.
+    </p>
+
+    <h3>What stays on your phone</h3>
+    <p>
+      Your run history (each run's date, start point, planned route, stops and what you found at
+      each), the route you're planning, and any updates waiting to be sent are stored only on your
+      device. They're never uploaded to me. Waiting updates go to OpenStreetMap once you're signed
+      in and online, as described above.
+    </p>
+    <p>
+      Run alerts (a fountain coming up, a run finishing, your progress while the screen is locked)
+      and the run's Live Activity are created on your device. {APP_NAME} doesn't use push notifications,
+      so it never collects a device token.
+    </p>
+
+    <h3>What you send through the website's forms</h3>
+    <ul>
+      <li>The waitlist form collects your name and email address.</li>
+      <li>The feedback form collects your message and, only if you give it, your email address.</li>
+    </ul>
+    <p>Both are delivered to me through Formspree, a form service.</p>
+
+    <h3>Routine server records and cookies</h3>
+    <p>
+      Like any online service, the servers {APP_NAME} runs on (hosted by Vercel) record routine details
+      of each request: IP address, browser or app version, the address requested and the time. These records
+      are used only to keep the service running and secure.
+    </p>
+    <p>
+      The website sets cookies only for signing in: short-lived ones (ten minutes) that complete a
+      sign-in securely, and the sign-in cookie described above, which lasts up to seven days. It
+      uses no advertising or analytics cookies.
+    </p>
+  </DocSection>
+
+  <DocSection heading={`What ${APP_NAME} doesn't collect`}>
+    <ul>
+      <li>
+        No analytics, crash reporting or advertising tools, in the app or on the website, and no
+        tracking across other companies' apps and websites.
+      </li>
+      <li>
+        No health or fitness data: {APP_NAME} doesn't read from or write to Apple Health, and it doesn't
+        record your pace or heart rate.
+      </li>
+      <li>No contacts, photos, camera, microphone or files.</li>
+      <li>
+        Nothing is sold, rented or shared for advertising or marketing, and your location is never
+        used for advertising or marketing.
+      </li>
+    </ul>
+  </DocSection>
+
+  <DocSection heading="How it's used">
+    <p>{APP_NAME} uses the information above only to:</p>
+    <ul>
+      <li>show you the map and the fountains around you;</li>
+      <li>plan your routes and guide you during a run;</li>
+      <li>publish the fountain updates you choose to send, and show your profile in the app;</li>
+      <li>reply to your feedback and send you a waitlist invitation;</li>
+      <li>keep the service running, secure and free of abuse.</li>
+    </ul>
+    <p>
+      It isn't used for anything else: not for advertising, not for profiling, and not for sale.
+    </p>
+  </DocSection>
+
+  <DocSection heading="Who else receives it">
+    <p>
+      {APP_NAME} relies on a handful of services, and each receives only what it needs for its part:
+    </p>
+    <ul>
+      <li>
+        <strong>OpenStreetMap</strong> (the OpenStreetMap Foundation) handles your sign-in, provides your
+        account details, and publishes the updates you send. In the app, your device also loads map images
+        straight from OpenStreetMap's map servers, which see your IP address and the part of the map on
+        screen. See the{" "}
+        <a href="https://osmfoundation.org/wiki/Privacy_Policy">OpenStreetMap privacy policy</a>.
+      </li>
+      <li>
+        <strong>Public map data search servers</strong> (the volunteer-run{" "}
+        <a href="https://overpass-api.de">Overpass API</a> servers) receive the map areas being searched
+        for fountains. They hear from {APP_NAME}'s server, not from your device, so they don't
+        receive your IP address or who you are.
+      </li>
+      <li>
+        <strong><a href="https://brouter.de">BRouter</a></strong>, a volunteer-run route planner,
+        receives the stops of a route being planned, so it can work out the path on foot between
+        them. It also hears only from {APP_NAME}'s server.
+      </li>
+      <li>
+        <strong><a href="https://openfreemap.org">OpenFreeMap</a></strong> supplies the website map's
+        images, and <strong><a href="https://maplibre.org">MapLibre</a></strong> the lettering on the
+        app's map. Your browser or device loads them directly, so these services see your IP address and
+        the part of the map on screen.
+      </li>
+      <li>
+        <strong>Vercel</strong> hosts the website and {APP_NAME}'s server, and keeps the routine
+        records described above. See <a href="https://vercel.com/legal/privacy-policy"
+          >Vercel's privacy policy</a
+        >.
+      </li>
+      <li>
+        <strong>Formspree</strong> receives and delivers what you send through the website's forms. See{
+          " "
+        }
+        <a href="https://formspree.io/legal/privacy-policy">Formspree's privacy policy</a>.
+      </li>
+    </ul>
+    <p>
+      I share information only with services that protect it at least as well as this policy does,
+      and only so they can provide their part of {APP_NAME}. I don't share it with anyone else,
+      unless the law requires me to.
+    </p>
+  </DocSection>
+
+  <DocSection heading="How long it's kept">
+    <ul>
+      <li>
+        <strong>On your phone:</strong> run history and your planned route stay until you delete the app.
+        Waiting updates stay until they're sent.
+      </li>
+      <li>
+        <strong>Your sign-in:</strong> in the app, until you sign out; on the website, until you sign
+        out or after seven days, whichever comes first.
+      </li>
+      <li>
+        <strong>Locations sent to find fountains or plan routes:</strong> not kept once the request has
+        been answered.
+      </li>
+      <li>
+        <strong>The server's records of your updates:</strong> the copy of an updated fountain is deleted
+        after about a day. Log entries and routine server records are deleted automatically by Vercel
+        after a limited period; I don't copy them anywhere else.
+      </li>
+      <li>
+        <strong>Published updates:</strong> they're part of OpenStreetMap's public map and its history,
+        which OpenStreetMap keeps under its own policy.
+      </li>
+      <li>
+        <strong>Waitlist sign-ups:</strong> until you've been invited and no longer want updates, or until
+        you ask me to delete yours.
+      </li>
+      <li>
+        <strong>Feedback:</strong> for as long as it helps me follow up and improve {APP_NAME}, or
+        until you ask me to delete it.
+      </li>
+    </ul>
+  </DocSection>
+
+  <DocSection heading="Your choices" id="your-choices">
+    <p>You can withdraw your consent or remove your information at any time:</p>
+    <ul>
+      <li>
+        <strong>Location:</strong> change or turn off {APP_NAME}'s access in Settings › {APP_NAME} › Location.
+        Features that need your location, like run guidance, won't work without it.
+      </li>
+      <li>
+        <strong>Notifications:</strong> turn them off in Settings › {APP_NAME} › Notifications.
+      </li>
+      <li>
+        <strong>Signing out:</strong> in the app, go to Profile › Sign Out. This removes the sign-in key
+        from your device. To cut off {APP_NAME}'s access entirely, revoke it in your{" "}
+        <a href="https://www.openstreetmap.org/oauth2/authorized_applications"
+          >OpenStreetMap account settings</a
+        >.
+      </li>
+      <li>
+        <strong>Data on your phone:</strong> deleting the app deletes your run history, your planned route
+        and any updates that haven't been sent.
+      </li>
+      <li>
+        <strong>Your account:</strong>{" "}
+        {APP_NAME} doesn't create or keep an account for you, so there's no {APP_NAME} account to delete.
+        Your OpenStreetMap account is OpenStreetMap's: you can{" "}
+        <a href="https://www.openstreetmap.org/account/deletion">delete it there</a>. Updates you've
+        already published stay part of the map's public history, as the{" "}
+        <a href="https://osmfoundation.org/wiki/Privacy_Policy">OpenStreetMap privacy policy</a> explains.
+      </li>
+      <li>
+        <strong>Everything else:</strong> to see, correct or delete your waitlist sign-up, your feedback,
+        or anything else I hold about you, email me at <a href={`mailto:${SUPPORT_EMAIL}`}
+          >{SUPPORT_EMAIL}</a
+        >. I'll reply within 30 days.
+      </li>
+    </ul>
+  </DocSection>
+
+  <DocSection heading="Children">
+    <p>
+      {APP_NAME} isn't directed at children under 13, and I don't knowingly collect information from them.
+      If you believe a child has sent me information, email me and I'll delete it.
+    </p>
+  </DocSection>
+
+  <DocSection heading="Security">
+    <p>
+      Everything {APP_NAME} sends travels over encrypted connections, and the sign-in key is kept in your
+      device's keychain or a cookie scripts can't read. Still, no way of sending or storing information
+      over the internet is completely secure, so while I work to protect your information I can't guarantee
+      its absolute security.
+    </p>
+  </DocSection>
+
+  <DocSection heading="Changes to this policy">
+    <p>
+      This policy is effective as of {EFFECTIVE}. If I change it, I'll post the new version on this
+      page with a new effective date, and for a significant change I'll also put a notice on the
+      website. Please check back from time to time.
+    </p>
+  </DocSection>
+
+  <DocSection heading="Contact">
+    <p>
+      For any questions or concerns about this policy or your information, email me at{" "}
+      <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>.
+    </p>
+  </DocSection>
+</ContentPage>
