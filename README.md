@@ -12,8 +12,11 @@ state back to OSM (`check_date`, `disused:`, `abandoned:`) as you go.
    split the city across multiple runs), then draws a real walking/running route via the free
    BRouter API. Loop or one-way, your choice.
 3. **Run** — mobile-first view: live distance + compass arrow to the next point. On arrival,
-   mark it **Working** / **Out of order** / **Removed**, which writes the edit to OSM under one
-   changeset for the run.
+   mark it **Working** / **Out of order** / **Removed**, or add a fountain that isn't mapped.
+   Nothing is sent during the run: each update is saved on the phone the moment it's made, so
+   a crash or a dead battery can't lose it. At the end, a review lists every update to correct
+   or drop, and confirming it writes the whole run to OSM as one changeset, in one atomic
+   upload. A run left unsent waits in Profile.
 
 State mapping (OSM lifecycle convention):
 

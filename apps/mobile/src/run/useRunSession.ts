@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { useRun, type RunStop, type StopStatus } from "@water-run/core/stores/run";
-import { isUndoable, useOutbox } from "@water-run/core/stores/outbox";
+import { createKey, useProposals, type ProposedItem } from "@water-run/core/stores/proposals";
 import {
   runGuidance,
   guidanceWindow,
@@ -17,10 +17,8 @@ import { isHomeLeg, isRunOver } from "@water-run/core/runLegs";
 import type { Turn } from "@water-run/core/brouter";
 import type { EditAction, EditExtras, Fountain } from "@water-run/core/schemas";
 import type { SurveyAction } from "../components/PointSheet";
-import { getToken } from "../auth/authStore";
 import { useOsmStatus } from "../auth/useOsmStatus";
 import { trackRun, type TrackingError } from "../tasks/runLocationTask";
-import { createFountain } from "./createFountain";
 import { hapticImpact, hapticSelect, hapticSuccess } from "../ports/haptics";
 import { announce } from "../ports/accessibility";
 import { keepAwake, allowSleep } from "../ports/keepAwake";
@@ -43,20 +41,26 @@ export const START_MARKER_ID = "start";
 // No turns to give: see offRoute below.
 const NO_TURNS: Turn[] = [];
 
-// The last stop recorded, for the panel's "Saved" line and its Undo: what to
-// cancel in the outbox, and what to put the run back to.
+// The last update recorded, for the panel's "Saved" line and its Undo: what
+// to put back in the run's held updates, and what to put the run back to.
+// Nothing has left the phone (updates are sent after the run's review), so
+// Undo is offered until the next action.
 type LastSaved = {
   nodeId: number;
   label: string;
-  // Absent for a point added on the spot: a create goes straight to OSM, so
-  // there is nothing on the device to take back.
   undo?: {
-    itemId: string;
-    holdUntil: number;
+    key: string; // the held update this record wrote
+    previous?: ProposedItem; // what it replaced, if anything
+    createdId?: number; // a point added on the spot: taken off the run too
     index: number; // where the run stood before the record
     status: StopStatus | undefined; // the stop's status before it
   };
 };
+
+// Said when an update couldn't be written to the phone's storage (it's full).
+// It is still held in memory, so it goes out with the run unless the app dies.
+const NOT_STORED =
+  "This update couldn't be saved to the phone's storage. Keep the app open until you've sent your run.";
 
 // The Expo run session: live GPS, the shared guidance derived from it, the OSM
 // recording actions, and marker DATA for WaterRunMap. Mirrors the web useRunSession
@@ -290,55 +294,67 @@ export function useRunSession({
 
   const recordFor = useCallback(
     (node: Fountain, action: SurveyAction, extras?: EditExtras) => {
-      const isCurrent = !!target && node.id === target.id;
       setErr(null);
+      const proposals = useProposals.getState();
+      // A point added on this run isn't on OSM yet: its held create takes the
+      // new details, or goes if the point turned out not to be there.
+      if (node.id < 0) {
+        const key = createKey(node.id);
+        if (action === "removed") {
+          proposals.remove(routeId, key);
+          run.removeNode(node.id);
+        } else if (!proposals.update(routeId, key, { extras })) {
+          setErr(NOT_STORED);
+        }
+        hapticSuccess();
+        announce("Saved.");
+        setLastSaved(null);
+        archiveRun(index);
+        return;
+      }
+      const isCurrent = !!target && node.id === target.id;
       const before = stops.find((st) => st.id === node.id)?.status;
-      const item = useOutbox
-        .getState()
-        .enqueue({ nodeId: node.id, action, tagKey, name: node.tags?.name, extras });
+      const { saved, item, previous } = proposals.record(routeId, {
+        nodeId: node.id,
+        action,
+        tagKey,
+        name: node.tags?.name,
+        extras,
+        point: { lat: node.lat, lon: node.lon, tags: node.tags ?? {} },
+      });
+      if (!item) {
+        setErr("This run's updates have already been sent.");
+        return;
+      }
+      if (!saved) setErr(NOT_STORED);
       run.setStatus(node.id, action as RunStop["status"]);
       hapticSuccess();
       announce(`Saved: ${SAVED_LABEL[action]}.`);
       setLastSaved({
         nodeId: node.id,
         label: SAVED_LABEL[action],
-        undo: item.holdUntil
-          ? { itemId: item.id, holdUntil: Date.parse(item.holdUntil), index, status: before }
-          : undefined,
+        undo: { key: item.key, previous, index, status: before },
       });
       // advance() archives the run at the next stop; a node off the current
       // stop is archived where the run stands.
       if (isCurrent) advance();
       else archiveRun(index);
-      useOutbox.getState().flush();
     },
-    [target, tagKey, run, index, advance, stops, setErr],
+    [target, tagKey, run, routeId, index, advance, stops, setErr],
   );
 
-  // Undo is on offer while the last record is still inside the outbox's hold
-  // (isUndoable); the panel's button goes when the hold ends.
-  const [undoOpen, setUndoOpen] = useState(false);
-  useEffect(() => {
-    const u = lastSaved?.undo;
-    const left = u ? u.holdUntil - Date.now() : 0;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- follows lastSaved; the timer closes it
-    setUndoOpen(left > 0);
-    if (left <= 0) return;
-    const t = setTimeout(() => setUndoOpen(false), left);
-    return () => clearTimeout(t);
-  }, [lastSaved]);
+  // Undo is on offer for the last record until the next action.
+  const undoOpen = !!lastSaved?.undo;
 
-  // Take the last record back: the edit never leaves the device, and the run
-  // returns to that stop as it was.
+  // Take the last record back: the held update returns to what it was (or
+  // goes), and the run returns to that stop as it was.
   const undoLast = useCallback(() => {
     const u = lastSaved?.undo;
     if (!u) return;
-    const item = useOutbox.getState().items.find((i) => i.id === u.itemId);
-    if (!item || !isUndoable(item, Date.now()) || !useOutbox.getState().cancel(u.itemId)) {
-      setUndoOpen(false);
-      announce("Too late to undo: the update is already on its way.");
-      return;
-    }
+    const proposals = useProposals.getState();
+    if (u.previous) proposals.put(routeId, u.previous);
+    else proposals.remove(routeId, u.key);
+    if (u.createdId !== undefined) run.removeNode(u.createdId);
     if (u.status !== undefined) run.setStatus(lastSaved!.nodeId, u.status);
     run.setIndex(u.index);
     setManualArrived(false);
@@ -346,7 +362,7 @@ export function useRunSession({
     setLastSaved(null);
     hapticSelect();
     announce("Undone.");
-  }, [lastSaved, run]);
+  }, [lastSaved, run, routeId]);
 
   const record = useCallback(
     (action: EditAction, extras?: EditExtras) => {
@@ -362,8 +378,9 @@ export function useRunSession({
   }, [target, run, advance]);
 
   // Step back to the previous stop and re-open it for action. Resets that stop's
-  // status to pending so the arrival actions show again (a re-record just
-  // enqueues a fresh OSM edit — last write wins). No-op at the first stop.
+  // status to pending so the arrival actions show again. Its held update stays
+  // until a re-record replaces it (one update per point), and the run's end
+  // puts the stop's status back from it. No-op at the first stop.
   const goBack = useCallback(() => {
     if (index <= 0) return;
     const pi = index - 1;
@@ -374,32 +391,34 @@ export function useRunSession({
     archiveRun(pi);
   }, [index, stops, run]);
 
-  // Create a brand-new node of the surveyed type at a given spot (GPS position
-  // or tapped map location). Rejects with a message fit for the user, so the
-  // add sheet can keep what was entered for another try. Sent straight away,
-  // not queued like an edit: a create resent after a reply that was lost would
-  // add the point twice.
+  // Add a brand-new point of the surveyed type at a given spot (GPS position
+  // or a held map location). Held with the run's other updates and created on
+  // OSM in the same upload, so it needs no connection or sign-in now, and a
+  // lost reply can't add it twice. The run shows it under its placeholder id
+  // until then.
   const addAt = useCallback(
     async (at: { lat: number; lon: number }, extras?: EditExtras): Promise<void> => {
-      // The token is the sign-in: the status endpoint can't tell signed out
-      // from offline.
-      if (!getToken()) throw new Error("Sign in first.");
       setErr(null);
-      setLastSaved(null);
-      const { changesetId, ...node } = await createFountain(
-        at,
-        { key: tagKey, value: tagValue },
+      const { saved, item } = useProposals.getState().addCreate(routeId, {
+        lat: at.lat,
+        lon: at.lon,
+        tag: { key: tagKey, value: tagValue },
         extras,
-      );
-      run.setChangeset(changesetId);
-      run.addNode(node);
+      });
+      if (!item) throw new Error("This run's updates have already been sent.");
+      if (!saved) setErr(NOT_STORED);
+      run.addNode({ id: item.tempId, lat: at.lat, lon: at.lon, tags: { [tagKey]: tagValue } });
       celebratePoint();
       hapticSuccess();
-      setLastSaved({ nodeId: node.id, label: "Added" });
+      setLastSaved({
+        nodeId: item.tempId,
+        label: "Added",
+        undo: { key: item.key, createdId: item.tempId, index, status: undefined },
+      });
       announce("Fountain added.");
       archiveRun(index);
     },
-    [tagKey, tagValue, run, index, setErr],
+    [tagKey, tagValue, run, routeId, index, setErr],
   );
 
   const addHere = useCallback(async () => {

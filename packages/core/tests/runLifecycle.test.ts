@@ -7,12 +7,15 @@ import {
   endRun,
   forgetStaleActiveRun,
   getActiveRunId,
+  reviveHeldUpdates,
+  runAwaitsReview,
   trackingAction,
 } from "../src/runLifecycle";
 import { getArchivedRoute, getArchivedRouteIndex } from "../src/routeArchive";
 import { useRun, type RunPlan, type RunStop } from "../src/stores/run";
 import { usePlanner } from "../src/stores/planner";
 import { useOutbox, UNDO_WINDOW_MS, type OutboxItem } from "../src/stores/outbox";
+import { useProposals } from "../src/stores/proposals";
 import { configureTestPorts } from "./helpers/ports";
 
 const ACTIVE_RUN_KEY = "water-run:active-run";
@@ -335,5 +338,42 @@ describe("closeChangesetWhenSettled", () => {
     });
     expect(await closeChangesetWhenSettled()).toBe("closed");
     expect(useOutbox.getState().changesetId).toBe(6);
+  });
+});
+
+describe("a run's held updates", () => {
+  beforeEach(() => {
+    useProposals.setState({ byRoute: {}, hydrated: true });
+  });
+
+  it("go to review when the run ends, with each stop's status taken from its update", () => {
+    const routeId = startRun();
+    useProposals
+      .getState()
+      .record(routeId, { nodeId: 1, action: "out_of_order", tagKey: "amenity" });
+    // The runner stepped back to stop 1 and moved on without re-recording it.
+    useRun.getState().setStatus(1, "skipped");
+
+    expect(endRun()).toBe(routeId);
+    expect(runAwaitsReview(routeId)).toBe(true);
+    expect(useProposals.getState().byRoute[routeId].state).toBe("review");
+    expect(getArchivedRoute(routeId)!.plan.stops[0].status).toBe("out_of_order");
+  });
+
+  it("leave nothing to review for a run that recorded nothing", () => {
+    const routeId = startRun();
+    endRun();
+    expect(runAwaitsReview(routeId)).toBe(false);
+  });
+
+  it("of a run the app died in are moved to review at the next launch", () => {
+    const routeId = startRun();
+    useProposals.getState().record(routeId, { nodeId: 1, action: "confirm", tagKey: "amenity" });
+    // The app dies; at the next launch the run can't be resumed.
+    ports.kv.remove("water-run:active-run");
+    useProposals.setState({ byRoute: {}, hydrated: false });
+    forgetStaleActiveRun();
+    reviveHeldUpdates();
+    expect(useProposals.getState().byRoute[routeId].state).toBe("review");
   });
 });

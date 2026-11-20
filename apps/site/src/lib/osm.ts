@@ -411,6 +411,200 @@ export async function createNode(
   return id;
 }
 
+// ---- a whole run in one changeset (api/osm/upload) ----
+
+// The comment on a run's changeset (fixed: the app doesn't ask for one).
+export const RUN_CHANGESET_COMMENT = "Survey: drinking water / amenity status check";
+
+// A diff upload is applied by OSM in one database transaction: every change
+// takes, or none does. Like a create it is a write that must not be cut short
+// carelessly, but unlike a create a resend is safe (the endpoint asks the
+// changeset first), so it gets a ceiling rather than a short timeout.
+const UPLOAD_TIMEOUT_MS = 90_000;
+
+export type ChangesetInfo = { open: boolean; changesCount: number };
+
+// Whether a changeset can still take edits, and how many it already holds. A
+// changeset that holds changes from an upload whose reply was lost is how the
+// upload endpoint tells a resend from a first try.
+export async function getChangeset(token: string, id: number): Promise<ChangesetInfo> {
+  if (DRY_RUN) return { open: true, changesCount: 0 };
+  const res = await upstreamFetch(`${API_BASE}/api/0.6/changeset/${id}.json`, {
+    headers: auth(token),
+    timeoutMs: READ_TIMEOUT_MS,
+  });
+  if (!res.ok) throw new OsmApiError(res.status, "get changeset", await res.text());
+  const cs = ((await res.json()) as { changeset?: { open?: unknown; changes_count?: unknown } })
+    .changeset;
+  if (!cs || typeof cs.open !== "boolean" || typeof cs.changes_count !== "number") {
+    throw new OsmApiError(502, "get changeset", "reply carried no changeset");
+  }
+  return { open: cs.open, changesCount: cs.changes_count };
+}
+
+// Nodes as a multi-fetch returns them: a deleted one carries visible=false and
+// no position.
+export type FetchedNode = NodeData & { id: number; visible: boolean };
+
+// Ids per multi-fetch request, keeping the URL well short of any limit.
+const NODES_PER_FETCH = 200;
+
+// Many nodes at once (GET /nodes?nodes=…). OSM answers 404 for the whole
+// request if any id never existed; then each is read on its own, so the caller
+// learns which ones are gone. A node that can't be found is simply absent from
+// the result; a deleted one is present with visible=false.
+export async function getNodes(token: string, ids: number[]): Promise<Map<number, FetchedNode>> {
+  const out = new Map<number, FetchedNode>();
+  for (let i = 0; i < ids.length; i += NODES_PER_FETCH) {
+    const chunk = ids.slice(i, i + NODES_PER_FETCH);
+    const res = await upstreamFetch(`${API_BASE}/api/0.6/nodes.json?nodes=${chunk.join(",")}`, {
+      headers: auth(token),
+      timeoutMs: READ_TIMEOUT_MS,
+    });
+    if (res.status === 404) {
+      for (const id of chunk) {
+        try {
+          const node = await getNode(token, id);
+          out.set(id, { ...node, id, visible: true });
+        } catch (e) {
+          if (e instanceof OsmApiError && (e.status === 404 || e.status === 410)) continue;
+          throw e;
+        }
+      }
+      continue;
+    }
+    if (!res.ok) throw new OsmApiError(res.status, "get nodes", await res.text());
+    const els = (
+      (await res.json()) as NodeJson & { elements?: { id?: number; visible?: boolean }[] }
+    ).elements;
+    for (const el of els ?? []) {
+      if (typeof el.id !== "number") continue;
+      out.set(el.id, {
+        id: el.id,
+        version: el.version,
+        lat: el.lat,
+        lon: el.lon,
+        tags: el.tags ?? {},
+        changeset: typeof el.changeset === "number" ? el.changeset : undefined,
+        visible: el.visible !== false,
+      });
+    }
+  }
+  return out;
+}
+
+export type DiffCreate = { tempId: number; lat: number; lon: number; tags: Record<string, string> };
+export type DiffModify = NodeData & { id: number };
+
+// The osmChange document for one upload: new nodes under placeholder (negative)
+// ids, modified nodes at the version they were read at. Every element names
+// the changeset, which OSM requires to be the one uploaded to.
+export function osmChangeXml(
+  changesetId: number,
+  creates: DiffCreate[],
+  modifies: DiffModify[],
+): string {
+  const create = creates
+    .map(
+      (c) =>
+        `<node id="${c.tempId}" lat="${c.lat}" lon="${c.lon}" changeset="${changesetId}">${tagsXml(c.tags)}</node>`,
+    )
+    .join("");
+  const modify = modifies
+    .map(
+      (m) =>
+        `<node id="${m.id}" version="${m.version}" lat="${m.lat}" lon="${m.lon}" changeset="${changesetId}">${tagsXml(m.tags)}</node>`,
+    )
+    .join("");
+  return (
+    `<osmChange version="0.6" generator="${escapeXml(CREATED_BY)}">` +
+    (create ? `<create>${create}</create>` : "") +
+    (modify ? `<modify>${modify}</modify>` : "") +
+    `</osmChange>`
+  );
+}
+
+export type DiffResultEntry = { oldId: number; newId: number; newVersion: number };
+
+// The attributes of every <node …> tag in an XML document, in order. OSM's
+// replies here are flat and machine-written, so a tag-level scan is enough.
+function nodeAttrs(xml: string): Record<string, string>[] {
+  const out: Record<string, string>[] = [];
+  for (const m of xml.matchAll(/<node\b([^>]*)\/?>/g)) {
+    const attrs: Record<string, string> = {};
+    for (const a of m[1].matchAll(/([\w:]+)="([^"]*)"/g)) attrs[a[1]] = a[2];
+    out.push(attrs);
+  }
+  return out;
+}
+
+export function parseDiffResult(xml: string): DiffResultEntry[] {
+  return nodeAttrs(xml)
+    .map((a) => ({
+      oldId: Number(a.old_id),
+      newId: Number(a.new_id),
+      newVersion: Number(a.new_version),
+    }))
+    .filter((e) => Number.isFinite(e.oldId) && Number.isFinite(e.newId));
+}
+
+// Upload one osmChange to an open changeset. Returns OSM's diffResult: for
+// each element, its id in the upload, its real id and the version written.
+export async function uploadChangeset(
+  token: string,
+  changesetId: number,
+  xml: string,
+): Promise<DiffResultEntry[]> {
+  if (DRY_RUN) {
+    // As OSM would answer: creates get ids, modifies the next version.
+    let nextId = DRY_RUN_NODE_ID;
+    return nodeAttrs(xml).map((a) => {
+      const id = Number(a.id);
+      return id < 0
+        ? { oldId: id, newId: nextId--, newVersion: 1 }
+        : { oldId: id, newId: id, newVersion: Number(a.version) + 1 };
+    });
+  }
+  const res = await upstreamFetch(`${API_BASE}/api/0.6/changeset/${changesetId}/upload`, {
+    method: "POST",
+    headers: { ...auth(token), "Content-Type": "text/xml" },
+    body: xml,
+    timeoutMs: UPLOAD_TIMEOUT_MS,
+  });
+  if (!res.ok) throw new OsmApiError(res.status, "upload changeset", await res.text());
+  return parseDiffResult(await res.text());
+}
+
+export type ChangesetContents = {
+  created: { id: number; lat: number; lon: number; version: number }[];
+  modified: { id: number; version: number }[];
+};
+
+// What a changeset already holds (its osmChange download): how the upload
+// endpoint reconstructs its answer for a resend whose first try landed.
+export async function downloadChangeset(token: string, id: number): Promise<ChangesetContents> {
+  const res = await upstreamFetch(`${API_BASE}/api/0.6/changeset/${id}/download`, {
+    headers: auth(token),
+    timeoutMs: READ_TIMEOUT_MS,
+  });
+  if (!res.ok) throw new OsmApiError(res.status, "download changeset", await res.text());
+  const xml = await res.text();
+  const section = (name: string) =>
+    [...xml.matchAll(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`, "g"))].map((m) => m[1]).join("");
+  return {
+    created: nodeAttrs(section("create")).map((a) => ({
+      id: Number(a.id),
+      lat: Number(a.lat),
+      lon: Number(a.lon),
+      version: Number(a.version),
+    })),
+    modified: nodeAttrs(section("modify")).map((a) => ({
+      id: Number(a.id),
+      version: Number(a.version),
+    })),
+  };
+}
+
 // One structured log line per write that reached OSM: a trail in the platform
 // logs for tracing a user's report. Unlike the old JSON-file log it has no
 // reader to wait for and nothing that can fail the request after OSM said yes.

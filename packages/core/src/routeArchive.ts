@@ -206,3 +206,23 @@ export function getArchivedRoutes(): ArchivedRoute[] {
     .filter((r): r is ArchivedRoute => r !== undefined)
     .sort(newestFirst);
 }
+
+// Change one archived run in place, for edits made after the run ended (the
+// end-of-run review, and the ids OSM assigns on submit). `fn` returns the new
+// plan, or the same object to leave it. Best-effort like every archive write.
+export function patchArchivedRoute(
+  routeId: string,
+  fn: (plan: ArchivedRoute["plan"]) => ArchivedRoute["plan"],
+): void {
+  const kv = store();
+  if (!kv) return;
+  try {
+    const route = readRoute(kv, routeId);
+    if (!route) return;
+    const plan = fn(route.plan);
+    if (plan === route.plan) return;
+    writeRoute(kv, { ...route, plan, updatedAt: new Date().toISOString() }, readIndex(kv));
+  } catch {
+    // storage full or disabled
+  }
+}

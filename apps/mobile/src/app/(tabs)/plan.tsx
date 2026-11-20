@@ -17,6 +17,7 @@ import { usePlannerMarkers } from "../../components/planner/usePlannerMarkers";
 import { usePlannerDraftSync } from "../../components/planner/usePlannerDraftSync";
 import { useOsmEdits } from "../../run/useOsmEdits";
 import { endRun } from "../../run/runLifecycle";
+import { runAwaitsReview } from "@water-run/core/runLifecycle";
 import { PointSheet } from "../../components/PointSheet";
 import { hapticSelect } from "../../ports/haptics";
 
@@ -163,15 +164,21 @@ function PlanContent() {
     if (await usePlanner.getState().startRun()) router.replace("/run");
   }, [router]);
 
-  // The same teardown as Finish on the run screen: unsent edits stay queued.
+  // The same teardown as Finish on the run screen, and then the same review of
+  // the run's updates before anything is sent.
   const confirmEndRun = useCallback(() => {
     confirmDestructive({
       title: "End this run?",
-      message: "Your progress is saved, and updates still waiting keep sending.",
+      message: "Your progress is saved. You'll review your updates before they're sent.",
       confirm: "End Run",
-      onConfirm: () => void endRun(),
+      onConfirm: () => {
+        const routeId = endRun();
+        if (routeId && runAwaitsReview(routeId)) {
+          router.push({ pathname: "/run-review", params: { id: routeId } });
+        }
+      },
     });
-  }, []);
+  }, [router]);
 
   const mapCenter: [number, number] = center ? [center.lat, center.lon] : [20, 0];
 

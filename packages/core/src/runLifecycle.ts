@@ -9,6 +9,7 @@ import { archiveRoute, getArchivedRoute, getArchivedRouteIndex } from "./routeAr
 import { useRun, type SavedRun } from "./stores/run";
 import { usePlanner } from "./stores/planner";
 import { useOutbox } from "./stores/outbox";
+import { useProposals } from "./stores/proposals";
 import { isRunOver, legCount } from "./runLegs";
 
 // The routeId of the run the user started and hasn't ended. Kept in the kv
@@ -104,6 +105,18 @@ export function forgetStaleActiveRun(): void {
   if (getActiveRunId() !== null && activeRunToResume() === null) setActiveRunId(null);
 }
 
+// At launch, after forgetStaleActiveRun: load every run's held updates, moving
+// those of a run that ended without its review (the app died) to review.
+export function reviveHeldUpdates(): void {
+  useProposals.getState().hydrate(getActiveRunId());
+}
+
+// Whether an ended run has updates waiting for the surveyor to review and send.
+export function runAwaitsReview(routeId: string): boolean {
+  const p = useProposals.getState().byRoute[routeId];
+  return !!p && p.state !== "submitted" && p.items.length > 0;
+}
+
 // What location tracking should do now. It belongs to an active run with a
 // screen listening for its fixes; anything else is tracking for nobody.
 // `started` is null when the platform couldn't say: then act on what's wanted.
@@ -118,15 +131,27 @@ export function trackingAction(f: {
 
 // End the current run, however it ends (finished, ended early, ended from the
 // planner). Synchronous, so the caller can leave the moment it returns: the run
-// is archived as finished, no longer active, the run and planner stores are
-// back to idle, and edits OSM already has are dropped from the outbox. Unsent
-// edits stay queued: they're the survey, not the run. Returns the run's
+// is archived as finished, no longer active, its held updates wait for review
+// (see stores/proposals), the run and planner stores are back to idle, and
+// edits OSM already has are dropped from the outbox. Returns the run's
 // routeId, or null if there was no run.
 export function endRun(): string | null {
   const run = useRun.getState();
-  const { hasPlan, routeId, index } = run;
-  if (hasPlan) archiveRun(Math.max(index, legCount(run)));
+  const { hasPlan, routeId, index, stops } = run;
+  if (hasPlan) {
+    // A stop stepped back to and then left keeps its held update, so the
+    // archive is told what will actually be sent.
+    const held = routeId ? useProposals.getState().byRoute[routeId] : undefined;
+    for (const item of held?.items ?? []) {
+      if (item.kind !== "edit") continue;
+      const stop = stops.find((s) => s.id === item.nodeId);
+      if (stop && stop.status !== item.action)
+        useRun.getState().setStatus(item.nodeId, item.action);
+    }
+    archiveRun(Math.max(index, legCount(run)));
+  }
   setActiveRunId(null);
+  if (hasPlan && routeId) useProposals.getState().toReview(routeId);
   useRun.getState().reset();
   usePlanner.getState().resetAfterRun();
   useOutbox

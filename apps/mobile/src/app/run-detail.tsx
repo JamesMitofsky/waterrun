@@ -1,6 +1,8 @@
 import { useMemo } from "react";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { ScrollView, Text, View } from "react-native";
+import { Linking, Pressable, ScrollView, Text, View } from "react-native";
+import { ArrowSquareOutIcon } from "phosphor-react-native/src/icons/ArrowSquareOut";
+import { useProposals } from "@water-run/core/stores/proposals";
 import { SafeArea } from "../components/ui/SafeArea";
 import { getArchivedRoute } from "@water-run/core/routeArchive";
 import { STATUS_COLOR } from "@water-run/core/editStatus";
@@ -39,6 +41,10 @@ export default function RunDetail() {
   const justFinished = fresh === "1";
   // This one run, read once: not the whole archive, and not on every render.
   const route = useMemo(() => getArchivedRoute(id), [id]);
+  // The run's updates: held for review, or sent (with their changeset).
+  const proposal = useProposals((s) => s.byRoute[id]);
+  const awaiting = !!proposal && proposal.state !== "submitted" && proposal.items.length > 0;
+  const sentUrl = proposal?.result?.changesetUrl;
 
   if (!route) {
     return (
@@ -90,7 +96,7 @@ export default function RunDetail() {
       <ScrollView contentContainerClassName="gap-3 p-5">
         <View className="gap-1">
           <Text accessibilityRole="header" className="text-2xl text-base font-bold">
-            {justFinished ? "Run Saved" : when}
+            {justFinished ? (sentUrl ? "Updates Sent" : "Run Saved") : when}
           </Text>
           <Text className="text-muted text-callout">
             {justFinished ? `${when} · ` : ""}
@@ -140,10 +146,32 @@ export default function RunDetail() {
             </View>
           ))}
         </View>
+        {awaiting ? (
+          <View className="gap-2">
+            <Text className="text-muted text-sm">
+              {proposal.items.length} {proposal.items.length === 1 ? "update is" : "updates are"}{" "}
+              saved on this phone and not sent yet.
+            </Text>
+            <Button
+              title="Review & Send"
+              variant={justFinished ? "secondary" : "action"}
+              onPress={() => router.push({ pathname: "/run-review", params: { id } })}
+            />
+          </View>
+        ) : null}
+        {sentUrl ? (
+          <Pressable
+            onPress={() => void Linking.openURL(sentUrl)}
+            accessibilityRole="link"
+            hitSlop={12}
+            className="flex-row items-center gap-1 self-start"
+          >
+            <ArrowSquareOutIcon size={16} color="#1877a3" />
+            <Text className="text-action text-sm font-bold">View Online</Text>
+          </Pressable>
+        ) : null}
         {justFinished ? (
-          <Text className="text-muted text-sm">
-            This run is saved under Your Runs in Profile. Updates still waiting send by themselves.
-          </Text>
+          <Text className="text-muted text-sm">This run is saved under Your Runs in Profile.</Text>
         ) : null}
         <View className="mt-2">
           {justFinished ? (

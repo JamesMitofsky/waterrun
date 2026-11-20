@@ -19,10 +19,11 @@ configureMobilePorts();
 settleRunAtLaunch();
 SplashScreen.preventAutoHideAsync();
 
-// No sign-in gate: Nearby, the planner and a run all work signed out, and
-// edits made meanwhile wait in the outbox for a token (HIG: Managing accounts,
-// "Delay sign-in for as long as possible"). Sign-in is offered where it's
-// needed: Profile, a saved edit, adding a fountain. The splash still waits on
+// No sign-in gate: Nearby, the planner and a run all work signed out. Edits
+// made off a run wait in the outbox for a token, and a run's updates wait on
+// the phone for its review (HIG: Managing accounts, "Delay sign-in for as long
+// as possible"). Sign-in is offered where it's needed: Profile, a saved edit,
+// adding a fountain off a run, sending a run. The splash still waits on
 // the keychain read, so the first screen already knows who is signed in.
 export default function RootLayout() {
   const { ready } = useAuth();
@@ -46,6 +47,7 @@ export default function RootLayout() {
           <Stack.Screen name="index" />
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="run" />
+          <Stack.Screen name="run-review" />
           <Stack.Screen name="run-detail" />
         </Stack>
         <ConfettiHost />

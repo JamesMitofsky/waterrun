@@ -22,16 +22,17 @@ import { checkedAgoLabel } from "@water-run/core/checkDate";
 import { STATUS_COLOR } from "@water-run/core/editStatus";
 import { framePadding } from "@water-run/core/mapFrame";
 import type { StopStatus } from "@water-run/core/stores/run";
-import { useOutbox, type OutboxItem } from "@water-run/core/stores/outbox";
+import { itemFor, useProposals } from "@water-run/core/stores/proposals";
+import { runAwaitsReview } from "@water-run/core/runLifecycle";
 import { mapButtonsBottom, WaterRunMap, type MapButton } from "../map/WaterRunMap";
 import { START_MARKER_ID, useRunSession, type RunSession } from "../run/useRunSession";
 import { endRun } from "../run/runLifecycle";
-import { PointSheet, pointEditOf } from "../components/PointSheet";
+import { PointSheet, pointEditOfProposal } from "../components/PointSheet";
 import { Button } from "../components/ui/Button";
 import { PopIn } from "../components/ui/PopIn";
 import { confirmDestructive } from "../components/ui/confirm";
 import { useSignedIn } from "../auth/useSignedIn";
-import { promptSignIn, SignInButton } from "../auth/SignInButton";
+import { SignInButton } from "../auth/SignInButton";
 
 // Human-facing status shown in the end-of-run recap.
 const STATUS_LABEL: Record<StopStatus, string> = {
@@ -55,14 +56,6 @@ const COMPASS_WORDS: Record<string, string> = {
   W: "west",
   NW: "northwest",
 };
-
-// A point's latest queued edit: a later survey of it supersedes the earlier.
-function latestEdit(items: OutboxItem[], id: number | string): OutboxItem | undefined {
-  for (let i = items.length - 1; i >= 0; i--) {
-    if (String(items[i].nodeId) === String(id)) return items[i];
-  }
-  return undefined;
-}
 
 export default function RunScreen() {
   const [selectedId, setSelectedId] = useState<number | string | null>(null);
@@ -92,19 +85,9 @@ export default function RunScreen() {
     openAdd.current = at;
     setAddLocation(at);
   };
-  // Adding a fountain creates it in OSM straight away (it can't wait in the
-  // outbox the way an edit can), so that is the moment to ask for sign-in.
-  const startAdd = (at: { lat: number; lon: number }) => {
-    if (!signedIn) {
-      promptSignIn({
-        title: "Sign in to add fountains",
-        message:
-          "A new fountain goes straight onto OpenStreetMap, the free public map Water Run saves to, so adding one needs an OpenStreetMap account.",
-      });
-      return;
-    }
-    showAdd(at);
-  };
+  // A new fountain is held with the run's other updates and sent after the
+  // review, so adding one needs no sign-in or connection now.
+  const startAdd = (at: { lat: number; lon: number }) => showAdd(at);
   const [now, setNow] = useState(() => new Date());
 
   // The map keeps the runner and their next stop in the part of it the run
@@ -148,14 +131,18 @@ export default function RunScreen() {
   const finished = useRef(false);
 
   // Finishing never waits on the network: the run ends on the device and the
-  // summary opens at once; the changeset closes in the background.
+  // review of its updates opens at once (the summary, for a run that changed
+  // nothing). Nothing reaches OSM until the review is confirmed.
   const handleFinish = () => {
     if (finished.current) return;
     finished.current = true;
     setEnded(live);
     const routeId = endRun();
-    if (routeId) router.replace({ pathname: "/run-detail", params: { id: routeId, fresh: "1" } });
-    else router.replace("/plan");
+    if (routeId && runAwaitsReview(routeId)) {
+      router.replace({ pathname: "/run-review", params: { id: routeId } });
+    } else if (routeId) {
+      router.replace({ pathname: "/run-detail", params: { id: routeId, fresh: "1" } });
+    } else router.replace("/plan");
   };
 
   // A loop still ends back at the start, so ending early heads there.
@@ -179,14 +166,13 @@ export default function RunScreen() {
     );
   }, [selectedId, s.stops, s.added, s.pool]);
 
-  // The tapped point's latest queued edit, followed while the sheet is open so
-  // its sync state (and a Retry) stays current. Only a change to that edit
-  // re-renders the screen.
-  const selectedItem = useOutbox((o) =>
-    selectedId == null ? undefined : latestEdit(o.items, selectedId),
+  // The tapped point's held update, followed while the sheet is open. Only a
+  // change to that update re-renders the screen.
+  const selectedItem = useProposals((p) =>
+    selectedId == null ? undefined : itemFor(p.byRoute[s.routeId], selectedId),
   );
   const selectedEdit = useMemo(
-    () => (selectedItem ? pointEditOf(selectedItem) : undefined),
+    () => (selectedItem ? pointEditOfProposal(selectedItem) : undefined),
     [selectedItem],
   );
 
@@ -302,7 +288,12 @@ export default function RunScreen() {
                 No points surveyed. Finish to save your route.
               </Text>
             )}
-            <Button title="Finish Run" variant="action" size="lg" onPress={handleFinish} />
+            <Button
+              title={surveyed.length + s.added.length > 0 ? "Review Updates" : "Finish Run"}
+              variant="action"
+              size="lg"
+              onPress={handleFinish}
+            />
           </>
         ) : s.homeward ? (
           <>
@@ -348,7 +339,7 @@ export default function RunScreen() {
             {!signedIn ? (
               <View className="mt-1 flex-row items-center gap-3">
                 <Text className="text-light-muted flex-1 text-sm">
-                  Updates are kept on this phone until you sign in.
+                  Updates stay on this phone. You&apos;ll sign in to send them at the end.
                 </Text>
                 <SignInButton style="link" tone="light" />
               </View>
@@ -445,6 +436,7 @@ export default function RunScreen() {
           <PointSheet
             fountain={selectedPoint}
             edit={selectedEdit}
+            newPointLabel="Save Details"
             // A stop set back to pending (Back) is there to be answered again,
             // so the questions show rather than the answer on record.
             reask={"status" in selectedPoint && selectedPoint.status === "pending"}
@@ -465,11 +457,9 @@ export default function RunScreen() {
               lon: addLocation.lon,
               tags: { amenity: "drinking_water" },
             }}
-            // The sheet, and what was typed into it, stays until the point
-            // exists: a failed add shows its reason there for another try.
-            // Once the sheet has been swiped away (it can be, mid-save) the
-            // reason goes to the run panel instead, and a late success leaves
-            // alone a sheet since opened at another spot.
+            // The point is held with the run's updates, so the add settles at
+            // once; a failure (the run already sent) shows its reason in the
+            // sheet, or on the run panel once the sheet has gone.
             onAction={async (_action, extras) => {
               try {
                 await s.addAt(addLocation, extras);

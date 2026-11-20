@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { withUniwind } from "uniwind";
@@ -8,6 +8,7 @@ import { SafeArea } from "../../components/ui/SafeArea";
 import { getArchivedRouteIndex, type ArchivedRouteSummary } from "@water-run/core/routeArchive";
 import { fmtDist } from "@water-run/core/geo";
 import { outboxCounts, useOutbox } from "@water-run/core/stores/outbox";
+import { heldCount, useProposals, waitingForReview } from "@water-run/core/stores/proposals";
 import { useOsmStatus } from "../../auth/useOsmStatus";
 import { useOsmUser } from "../../auth/useOsmUser";
 import { useSignedIn } from "../../auth/useSignedIn";
@@ -45,7 +46,14 @@ function ProfileContent() {
   const { status } = useOsmStatus();
   const user = useOsmUser();
   const signedIn = useSignedIn();
-  const unsent = useOutbox((s) => outboxCounts(s.items).unsent);
+  // Updates not on OSM yet: queued in the outbox (made off a run), and held
+  // for a run's review.
+  const queued = useOutbox((s) => outboxCounts(s.items).unsent);
+  const byRoute = useProposals((s) => s.byRoute);
+  const held = heldCount(byRoute);
+  const unsent = queued + held;
+  const toReview = useMemo(() => waitingForReview(byRoute), [byRoute]);
+  const unsentRuns = useMemo(() => new Set(toReview.map((p) => p.routeId)), [toReview]);
   // Read from the archive's small index, not the runs themselves, and again
   // each time the tab is shown, so a run finished since is listed.
   const [routes, setRoutes] = useState<ArchivedRouteSummary[]>(getArchivedRouteIndex);
@@ -66,7 +74,11 @@ function ProfileContent() {
       title: "Sign out?",
       message: `${unsent} ${unsent === 1 ? "update hasn't" : "updates haven't"} been sent yet. ${
         unsent === 1 ? "It stays" : "They stay"
-      } on this phone and ${unsent === 1 ? "goes" : "go"} out when you sign in again.`,
+      } on this phone${
+        held > 0
+          ? ", and runs waiting for review can be sent after you sign in again."
+          : " and go out when you sign in again."
+      }`,
       confirm: "Sign Out",
       onConfirm: () => void signOutOsm(),
     });
@@ -147,6 +159,32 @@ function ProfileContent() {
           </Panel>
         ) : null}
 
+        {toReview.length > 0 ? (
+          <Panel className="gap-3">
+            <Text accessibilityRole="header" className="text-base text-lg font-bold">
+              {toReview.length === 1 ? "A run is" : `${toReview.length} runs are`} waiting to be
+              sent
+            </Text>
+            <Text className="text-muted text-callout leading-6">
+              Their updates are saved on this phone. Review them and send them to the map.
+            </Text>
+            {toReview.map((p) => (
+              <Button
+                key={p.routeId}
+                title={`Review ${p.items.length} ${p.items.length === 1 ? "Update" : "Updates"} from ${new Date(
+                  p.createdAt,
+                ).toLocaleDateString(undefined, {
+                  weekday: "short",
+                  month: "short",
+                  day: "numeric",
+                })}`}
+                variant="action"
+                onPress={() => router.push({ pathname: "/run-review", params: { id: p.routeId } })}
+              />
+            ))}
+          </Panel>
+        ) : null}
+
         <Panel>
           <Text accessibilityRole="header" className="mb-1 text-base text-lg font-bold">
             Your Runs
@@ -173,12 +211,17 @@ function ProfileContent() {
                       router.push({ pathname: "/run-detail", params: { id: r.routeId } })
                     }
                     accessibilityRole="button"
-                    accessibilityLabel={`${date}, ${fmtDist(r.distanceM)}, ${r.stopCount} stops`}
+                    accessibilityLabel={`${date}, ${fmtDist(r.distanceM)}, ${r.stopCount} stops${
+                      unsentRuns.has(r.routeId) ? ", not sent yet" : ""
+                    }`}
                     className="border-border min-h-11 flex-row items-center gap-2 border-t py-3 active:opacity-60"
                   >
                     <Text className="text-callout flex-1 text-base">
                       {date} · {fmtDist(r.distanceM)} · {r.stopCount} stops
                     </Text>
+                    {unsentRuns.has(r.routeId) ? (
+                      <Text className="text-sm font-semibold text-amber-700">Not sent</Text>
+                    ) : null}
                     <CaretRightIcon size={16} color="#4d5c6a" weight="bold" />
                   </Pressable>
                 );

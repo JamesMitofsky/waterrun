@@ -16,6 +16,7 @@ import { pointStatusLine } from "@water-run/core/pointStatus";
 import type { EditAction, EditExtras, Fountain } from "@water-run/core/schemas";
 import { surveyExtras, surveyFormDefaults } from "@water-run/core/surveyDefaults";
 import { useOutbox, type OutboxItem, type SyncState } from "@water-run/core/stores/outbox";
+import type { ProposedItem } from "@water-run/core/stores/proposals";
 import { INK, PointDetailsForm, type Ink } from "./PointDetailsForm";
 import { useSignedIn } from "../auth/useSignedIn";
 import { SignInButton } from "../auth/SignInButton";
@@ -36,6 +37,9 @@ export type PointEdit = {
   // inside the outbox's undo hold, before any send (see isUndoable).
   id?: string;
   undoUntil?: number;
+  // Held with a run's other updates, sent after the run's review rather than
+  // by the outbox (see stores/proposals).
+  draft?: boolean;
 };
 
 // What the sheet shows for a queued edit.
@@ -52,6 +56,18 @@ export function pointEditOf(item: OutboxItem): PointEdit {
   };
 }
 
+// What the sheet shows for an update held for a run's review. `id` changes
+// with each change, so the card pops again when the update is replaced.
+export function pointEditOfProposal(item: ProposedItem): PointEdit {
+  return {
+    status: item.kind === "edit" ? item.action : "confirm",
+    syncState: "pending",
+    extras: item.extras,
+    id: `${item.key}@${item.updatedAt}`,
+    draft: true,
+  };
+}
+
 const STATUS_LABEL: Record<SurveyAction, string> = {
   confirm: "Confirmed working",
   broken: "Marked partially working",
@@ -63,6 +79,7 @@ const STATUS_LABEL: Record<SurveyAction, string> = {
 // error has been tried and the outbox will resend it by itself; a failed one
 // it won't, so that one gets a Retry.
 function syncLabel(edit: PointEdit, signedIn: boolean): string {
+  if (edit.draft) return "Saved on this phone · sent after your review";
   switch (edit.syncState) {
     case "pending":
       if (!signedIn) return "Saved on this phone";
@@ -202,6 +219,9 @@ type Props = {
   onUndo?: (edit: PointEdit) => void;
   inRoute?: boolean;
   onToggleRoute?: () => void;
+  // The details form's button for a point not on OSM yet: "Add Fountain" when
+  // adding it, something like "Save Details" when changing one already held.
+  newPointLabel?: string;
   // Open on the survey questions even though an edit is on record: the run
   // stepped back to this stop so it can be answered again.
   reask?: boolean;
@@ -214,6 +234,7 @@ export function PointSheet({
   onUndo,
   inRoute,
   onToggleRoute,
+  newPointLabel = "Add Fountain",
   reask = false,
 }: Props) {
   const tags = fountain.tags ?? {};
@@ -314,7 +335,7 @@ export function PointSheet({
   // to ask about something being added, and "No Fountain" would make no sense.
   const form: SurveyAction | null = isNew ? "confirm" : detailFor;
   const formSpec = isNew
-    ? { ...FORMS.confirm, title: "New Fountain", label: "Add Fountain", Icon: PlusCircleIcon }
+    ? { ...FORMS.confirm, title: "New Fountain", label: newPointLabel, Icon: PlusCircleIcon }
     : form
       ? FORMS[form]
       : null;
@@ -470,7 +491,7 @@ export function PointSheet({
             ) : null}
             {/* An edit made signed out waits on the phone; this is the moment
               sign-in is worth asking for (HIG: Managing accounts). */}
-            {!signedIn && edit.syncState === "pending" ? (
+            {!signedIn && edit.syncState === "pending" && !edit.draft ? (
               <View className="border-border mt-2 gap-3 border-t pt-3">
                 <Text className="text-muted text-sm">
                   Sign in to send your updates to OpenStreetMap, the free public map Water Run saves
