@@ -1,0 +1,5 @@
+node_modules/
+# Rendered from OpenFreeMap tiles by `npm run maps`; the .json views beside them are kept.
+assets/maps/*.png
+# Intermediate: muxed into the preview video.
+export/video/score.wav

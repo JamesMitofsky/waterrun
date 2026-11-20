@@ -1,0 +1,131 @@
+---
+import ContentPage from "@/layouts/ContentPage.astro";
+import { APP_NAME } from "@/lib/appConfig";
+
+export const prerender = true;
+
+// The privacy policy for the site and the iOS app, and the URL App Store
+// Connect lists. Every claim here is about what the code does today: if a
+// change adds a service, a stored field or a new use of location, update this
+// page in the same change, and bump UPDATED.
+const UPDATED = "November 7, 2026";
+
+const h2 = "font-hero text-hero mt-12 text-[1.6rem] leading-tight tracking-tight";
+const p = "text-muted mt-4 text-lg leading-relaxed";
+const ul = "text-muted mt-4 list-disc space-y-2 pl-6 text-lg leading-relaxed";
+---
+
+<ContentPage
+  title={`Privacy — ${APP_NAME}`}
+  description={`What ${APP_NAME} collects, why, and who else sees it.`}
+  heading="Privacy"
+>
+  <p class={p}>Last updated {UPDATED}.</p>
+
+  <p class={p}>
+    {APP_NAME} is an independent project by James Mitofsky. This policy covers the {APP_NAME} website
+    (waterrun.app) and the {APP_NAME} app for iPhone. In short: there are no ads, no analytics, no tracking,
+    and nothing is sold. We only handle what the app needs to find fountains, plan a run and save what
+    you report to the map.
+  </p>
+
+  <h2 class={h2}>Your location</h2>
+  <p class={p}>
+    The app uses your location while you're using it, to show where you are and find fountains near
+    you. During a run, if you allow it, it also uses your location in the background so it can keep
+    guiding you with the screen locked. It doesn't use your location in the background outside a
+    run. On the website, location is used only if you tap the locate button and your browser allows
+    it.
+  </p>
+  <p class={p}>
+    To search an area or plan a route, the app and the website send our server the map coordinates
+    involved: the area to search, or the start and stops to route through. Our server passes them on
+    to public OpenStreetMap services to find fountains and to BRouter to draw the route. Those
+    services see our server, not you. We don't keep these requests or tie them to you, and your
+    recorded runs stay on your phone.
+  </p>
+
+  <h2 class={h2}>What you report goes on a public map</h2>
+  <p class={p}>
+    {APP_NAME} saves what you report (a fountain working, broken or gone, details like a bottle filler
+    or dog bowl, a short note, or a new fountain) to OpenStreetMap, the free public map of the world.
+    Edits there are public by design: anyone can see what changed, where, when, and the OpenStreetMap
+    username that made the change, and the edit stays in the map's history. OpenStreetMap's own <a
+      href="https://osmfoundation.org/wiki/Privacy_Policy"
+      target="_blank"
+      rel="noopener noreferrer">privacy policy</a
+    > covers your account and your edits there.
+  </p>
+  <p class={p}>
+    Until you sign in, your reports wait on your phone and go nowhere. After an edit is sent, our
+    server keeps a copy of the changed fountain for a day, so searches show it before
+    OpenStreetMap's search services catch up, and logs a line naming the fountain, the change and
+    the OpenStreetMap changeset number. Neither copy says who you are, though the changeset itself
+    is public.
+  </p>
+
+  <h2 class={h2}>Signing in with OpenStreetMap</h2>
+  <p class={p}>
+    {APP_NAME} has no accounts of its own. To send reports you sign in with an OpenStreetMap account,
+    on OpenStreetMap's own page, so we never see your password. OpenStreetMap gives {APP_NAME} a key that
+    lets it read your profile and make map edits for you, and nothing else.
+  </p>
+  <ul class={ul}>
+    <li>
+      In the app, that key is kept in your iPhone's Keychain. On the website, it's kept in a secure
+      cookie that expires after a week.
+    </li>
+    <li>Our server passes the key to OpenStreetMap with each edit and doesn't store it.</li>
+    <li>
+      From your profile, the app shows your username, picture, number of contributions and the date
+      you joined.
+    </li>
+  </ul>
+  <p class={p}>
+    Sign out from the Profile tab in the app. To take {APP_NAME}'s access away entirely, revoke it
+    in your OpenStreetMap account settings.
+  </p>
+
+  <h2 class={h2}>Kept on your device</h2>
+  <p class={p}>
+    Your recorded runs, the route you're planning and any reports not sent yet are stored on your
+    phone (or in your browser on the website), so nothing is lost if you're offline. They stay there
+    until you delete the app or clear the site's data. Run notifications and the Lock Screen Live
+    Activity are created on your phone. We don't send push notifications.
+  </p>
+
+  <h2 class={h2}>The waitlist and feedback forms</h2>
+  <p class={p}>
+    If you join the waitlist, we collect your name and email. If you send feedback, we collect your
+    message and, if you choose to give one, your email. Both forms are handled by Formspree, which
+    stores them and forwards them to us by email. We use them only to reply to you and to tell
+    waitlist members when the app launches. Ask through the feedback form and we'll delete what you
+    sent.
+  </p>
+
+  <h2 class={h2}>Who else is involved</h2>
+  <p class={p}>Using {APP_NAME} means these services handle some of your data:</p>
+  <ul class={ul}>
+    <li>Vercel hosts the website and our server, and keeps request logs for a short time.</li>
+    <li>
+      OpenFreeMap serves the website's map tiles, and OpenStreetMap's tile servers serve the app's.
+      Your browser or phone loads them directly, so those services see your IP address and the area
+      of the map you're viewing. The app also loads the font for its map labels from MapLibre's demo
+      server.
+    </li>
+    <li>OpenStreetMap handles sign-in and stores the edits you make.</li>
+    <li>Formspree receives the waitlist and feedback forms.</li>
+  </ul>
+
+  <h2 class={h2}>Children</h2>
+  <p class={p}>
+    {APP_NAME} isn't directed at children under 13, and we don't knowingly collect their personal information.
+  </p>
+
+  <h2 class={h2}>Changes and contact</h2>
+  <p class={p}>
+    If this policy changes, we'll update this page and the date at the top. Questions or requests
+    about your data go through the <a href="/feedback">feedback form</a>. Leave an email if you'd
+    like a reply.
+  </p>
+</ContentPage>
